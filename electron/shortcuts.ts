@@ -8,6 +8,14 @@ export class ShortcutsHelper {
     this.appState = appState
   }
 
+  private emitWhenVisible(channel: string, payload?: any): void {
+    const mainWindow = this.appState.getMainWindow()
+    if (!mainWindow || !this.appState.isVisible()) {
+      return
+    }
+    mainWindow.webContents.send(channel, payload)
+  }
+
   public registerGlobalShortcuts(): void {
     // Add global shortcut to show/center window
     globalShortcut.register("CommandOrControl+Shift+Space", () => {
@@ -33,6 +41,14 @@ export class ShortcutsHelper {
     })
 
     globalShortcut.register("CommandOrControl+Enter", async () => {
+      try {
+        await this.appState.startCutScreenshotFlow()
+      } catch (error) {
+        console.error("Cut screenshot flow error:", error)
+      }
+    })
+
+    globalShortcut.register("CommandOrControl+Shift+Enter", async () => {
       await this.appState.processingHelper.processScreenshots()
     })
 
@@ -61,32 +77,40 @@ export class ShortcutsHelper {
 
     // New shortcuts for moving the window
     globalShortcut.register("CommandOrControl+Left", () => {
+      if (!this.appState.isVisible()) return
       console.log("Command/Ctrl + Left pressed. Moving window left.")
       this.appState.moveWindowLeft()
     })
 
     globalShortcut.register("CommandOrControl+Right", () => {
+      if (!this.appState.isVisible()) return
       console.log("Command/Ctrl + Right pressed. Moving window right.")
       this.appState.moveWindowRight()
     })
-    globalShortcut.register("CommandOrControl+Down", () => {
-      console.log("Command/Ctrl + down pressed. Moving window down.")
+
+    globalShortcut.register("CommandOrControl+Shift+Down", () => {
+      if (!this.appState.isVisible()) return
+      console.log("Command/Ctrl + Shift + Down pressed. Moving window down.")
       this.appState.moveWindowDown()
     })
+
     globalShortcut.register("CommandOrControl+Up", () => {
+      if (!this.appState.isVisible()) return
       console.log("Command/Ctrl + Up pressed. Moving window Up.")
       this.appState.moveWindowUp()
     })
 
+    globalShortcut.register("CommandOrControl+Down", () => {
+      console.log("Command/Ctrl + Down pressed. Toggling window visibility.")
+      this.appState.toggleMainWindow()
+    })
+
     globalShortcut.register("CommandOrControl+B", () => {
       this.appState.toggleMainWindow()
-      // If window exists and we're showing it, bring it to front
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow && !this.appState.isVisible()) {
-        // Force the window to the front on macOS
         if (process.platform === "darwin") {
           mainWindow.setAlwaysOnTop(true, "normal")
-          // Reset alwaysOnTop after a brief delay
           setTimeout(() => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.setAlwaysOnTop(true, "floating")
@@ -94,6 +118,27 @@ export class ShortcutsHelper {
           }, 100)
         }
       }
+    })
+
+    // Model selection shortcuts
+    globalShortcut.register("CommandOrControl+M", () => {
+      this.emitWhenVisible("perplexity-model-shortcut", "sonar")
+    })
+
+    globalShortcut.register("CommandOrControl+Comma", () => {
+      this.emitWhenVisible("perplexity-model-shortcut", "gpt-5")
+    })
+
+    globalShortcut.register("CommandOrControl+Period", () => {
+      this.emitWhenVisible("perplexity-model-shortcut", "gpt-5-reasoning")
+    })
+
+    globalShortcut.register("CommandOrControl+Slash", () => {
+      this.emitWhenVisible("perplexity-model-shortcut", "claude-sonnet-4.5-reasoning")
+    })
+
+    globalShortcut.register("CommandOrControl+W", () => {
+      this.emitWhenVisible("perplexity-web-search-toggle")
     })
 
     // Unregister shortcuts when quitting

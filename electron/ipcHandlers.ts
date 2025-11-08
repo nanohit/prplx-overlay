@@ -1,7 +1,12 @@
 // ipcHandlers.ts
 
-import { ipcMain, app } from "electron"
+import { ipcMain, app, shell } from "electron"
 import { AppState } from "./main"
+import { sendPerplexityPrompt } from "./PerplexityHelper"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+
+const execFileAsync = promisify(execFile)
 
 export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle(
@@ -26,6 +31,32 @@ export function initializeIpcHandlers(appState: AppState): void {
       console.error("Error taking screenshot:", error)
       throw error
     }
+  })
+
+  ipcMain.handle(
+    "perplexity-send-pending",
+    async (_event, message: string, options?: { timeoutSeconds?: number }) => {
+      return appState.sendPendingAttachment(message, options)
+    }
+  )
+
+  ipcMain.handle(
+    "update-perplexity-preferences",
+    async (
+      _event,
+      preferences: Partial<{
+        model: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+        webSearch: boolean
+        shouldStartNewChat: boolean
+      }>
+    ) => {
+      appState.updatePerplexityPreferences(preferences)
+    }
+  )
+
+  ipcMain.handle("clear-pending-attachment", async () => {
+    appState.clearPendingAttachment()
+    return { success: true }
   })
 
   ipcMain.handle("get-screenshots", async () => {
@@ -57,6 +88,21 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   ipcMain.handle("toggle-window", async () => {
     appState.toggleMainWindow()
+  })
+
+  ipcMain.handle("force-open-perplexity", async () => {
+    const url = "https://www.perplexity.ai"
+    try {
+      if (process.platform === "darwin") {
+        await execFileAsync("open", ["-g", "-a", "Safari", url])
+      } else {
+        await shell.openExternal(url)
+      }
+      return { success: true }
+    } catch (error) {
+      console.error("Failed to open Perplexity in Safari:", error)
+      throw error
+    }
   })
 
   ipcMain.handle("reset-queues", async () => {
@@ -112,6 +158,37 @@ export function initializeIpcHandlers(appState: AppState): void {
       throw error;
     }
   });
+
+  ipcMain.handle(
+    "perplexity-chat",
+    async (
+      event,
+      prompt: string,
+      options?: {
+        newChat?: boolean
+        model?: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+        webSearch?: boolean
+        requestId?: string
+      }
+    ) => {
+      const { requestId, ...perplexityOptions } = options ?? {}
+
+      return sendPerplexityPrompt(prompt, perplexityOptions, (payload) => {
+        try {
+          event.sender.send("perplexity-stream-update", {
+            requestId: requestId ?? null,
+            response: payload.response,
+            responses: payload.responses,
+            responseHtml: payload.responseHtml ?? null,
+            responsesHtml: payload.responsesHtml ?? null,
+            timestamp: payload.timestamp
+          })
+        } catch (error) {
+          console.warn("Failed to forward Perplexity stream update:", error)
+        }
+      })
+    }
+  )
 
   ipcMain.handle("quit-app", () => {
     app.quit()

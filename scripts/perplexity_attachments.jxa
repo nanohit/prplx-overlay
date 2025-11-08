@@ -1,0 +1,859 @@
+#!/usr/bin/osascript -l JavaScript
+
+ObjC.import('stdlib')
+ObjC.import('Foundation')
+
+function getEnv(name, fallback) {
+  const env = $.NSProcessInfo.processInfo.environment
+  try {
+    const value = env.objectForKey(name)
+    const unwrapped = ObjC.unwrap(value)
+    if (typeof unwrapped === 'undefined' || unwrapped === null) {
+      return typeof fallback === 'undefined' ? null : fallback
+    }
+    return unwrapped.toString()
+  } catch (error) {
+    return typeof fallback === 'undefined' ? null : fallback
+  }
+}
+
+function toBoolean(value) {
+  if (!value) return false
+  const normalized = value.toString().trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes'
+}
+
+function safeLower(value) {
+  if (!value) return ''
+  return value.toString().trim().toLowerCase()
+}
+
+function buildRawState(message) {
+  return {
+    root: {
+      children: [
+        {
+          children: [
+            {
+              detail: 0,
+              format: 0,
+              mode: 'normal',
+              style: '',
+              text: message,
+              type: 'text',
+              version: 1
+            }
+          ],
+          direction: null,
+          format: '',
+          indent: 0,
+          type: 'paragraph',
+          version: 1
+        }
+      ],
+      direction: null,
+      format: '',
+      indent: 0,
+      type: 'root',
+      version: 1
+    }
+  }
+}
+
+function findPerplexityTab(app) {
+  const windows = app.windows()
+  if (!windows || windows.length === 0) {
+    throw new Error('Safari has no open windows')
+  }
+
+  for (let wi = 0; wi < windows.length; wi++) {
+    const win = windows[wi]
+    const tabs = win.tabs()
+    for (let ti = 0; ti < tabs.length; ti++) {
+      const tab = tabs[ti]
+      const url = tab.url()
+      if (url && url.includes('perplexity.ai')) {
+        win.currentTab = tab
+        return tab
+      }
+    }
+  }
+
+  throw new Error('No Safari tab with perplexity.ai is currently open')
+}
+
+function runInTab(app, tab, script) {
+  return app.doJavaScript(script, { in: tab })
+}
+
+function clickNewChat(app, tab) {
+  const script = `
+    (function(){
+      const btn = document.querySelector('[data-testid="sidebar-new-thread"] button, [data-testid="sidebar-new-thread"]');
+      if (btn) {
+        btn.click();
+        return true;
+      }
+      return false;
+    })()
+  `
+  return runInTab(app, tab, script)
+}
+
+function pasteClipboardImage(app, tab) {
+  throw new Error('Clipboard paste not supported in this flow')
+}
+
+function countAttachments(app, tab) {
+  const script = `
+    (function(){
+      const selectors = [
+        '[data-testid="attachment-card"]',
+        '[data-testid="file-attachment"]',
+        '[data-testid^="attachment-"]',
+        '#ask-input img',
+        '#ask-input figure img'
+      ];
+      const seen = new Set();
+      selectors.forEach((selector) => {
+        document.querySelectorAll(selector).forEach((node) => seen.add(node));
+      });
+      return seen.size;
+    })()
+  `
+
+  const result = runInTab(app, tab, script)
+  return Number(result) || 0
+}
+
+function waitForAttachment(app, tab, baseline) {
+  const timeoutMs = 4000
+  const pollMs = 200
+  const start = Date.now()
+
+  while (Date.now() - start < timeoutMs) {
+    delay(pollMs / 1000)
+    const count = countAttachments(app, tab)
+    if (count > baseline) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function readFileBase64(filePath) {
+  const nsPath = ObjC.wrap(filePath)
+  const data = $.NSData.dataWithContentsOfFile(nsPath)
+  if (!data) {
+    throw new Error('Failed to read file at ' + filePath)
+  }
+  const base64NSString = data.base64EncodedStringWithOptions(0)
+  return ObjC.unwrap(base64NSString).toString()
+}
+
+function escapeForSingleQuote(str) {
+  return str.replace(/'/g, "\\'")
+}
+
+function attachImageFromPath(app, tab, filePath) {
+  const base64 = readFileBase64(filePath).replace(/\s+/g, '')
+  runInTab(app, tab, `window.__icAttachmentBase64 = ''; window.__icAttachmentName = 'cut-screenshot.png';`)
+
+  const chunkSize = 48000
+  for (let i = 0; i < base64.length; i += chunkSize) {
+    const chunk = base64.slice(i, i + chunkSize)
+    const escapedChunk = escapeForSingleQuote(chunk)
+    runInTab(app, tab, `window.__icAttachmentBase64 += '${escapedChunk}';`)
+  }
+
+  const script = `
+    (function(){
+      const selectors = [
+        'input[type="file"][accept*="image"]',
+        'input[type="file"][multiple]',
+        '[data-testid="file-input"] input[type="file"]',
+        '[data-testid="chat-composer"] input[type="file"]'
+      ];
+      let input = null;
+      for (const selector of selectors) {
+        const candidate = document.querySelector(selector);
+        if (candidate) {
+          input = candidate;
+          break;
+        }
+      }
+      if (!input) {
+        input = Array.from(document.querySelectorAll('input[type="file"]')).find((el) => !el.disabled && (!el.accept || /image/gi.test(el.accept)));
+      }
+      if (!input) {
+        return JSON.stringify({ status: 'missing-input' });
+      }
+      const base64 = window.__icAttachmentBase64 || '';
+      try {
+        const byteCharacters = atob(base64);
+        const byteArrays = new Uint8Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteArrays[i] = byteCharacters.charCodeAt(i);
+        }
+        const file = new File([byteArrays], window.__icAttachmentName || 'cut-screenshot.png', { type: 'image/png' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        const event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+        window.__icAttachmentBase64 = '';
+        return JSON.stringify({ status: 'dispatched' });
+      } catch (error) {
+        return JSON.stringify({ status: 'error', message: error && error.message ? error.message : String(error) });
+      }
+    })()
+  `
+
+  const result = runInTab(app, tab, script)
+  if (!result) {
+    throw new Error('No response from Perplexity attachment script')
+  }
+
+  try {
+    const parsed = JSON.parse(result)
+    if (parsed.status === 'dispatched') {
+      return true
+    }
+    if (parsed.status === 'missing-input') {
+      throw new Error('Could not find Perplexity file input to attach image')
+    }
+    throw new Error(parsed.message || 'Failed to dispatch attachment event')
+  } catch (error) {
+    throw new Error('Failed to parse attachment response: ' + result)
+  }
+}
+
+function getResponseState(app, tab) {
+  const script = `
+    (function(){
+      const nodes = Array.from(document.querySelectorAll('[data-testid="response-text"], div.prose'));
+      const texts = nodes
+        .map(node => (node.innerText || '').trim())
+        .filter(Boolean);
+      const streamingSelectors = [
+        '[data-testid="stop-generating"]',
+        '[data-testid="stop-button"]',
+        'button[aria-label="Stop generating"]',
+        '[data-testid="loading-bar"]',
+        '[data-testid="typing-indicator"]',
+        '[data-testid="progress-bar"]'
+      ];
+      const isStreaming = streamingSelectors.some(sel => Boolean(document.querySelector(sel)));
+      return JSON.stringify({ texts, isStreaming });
+    })()
+  `
+
+  const json = runInTab(app, tab, script)
+  if (!json) return { texts: [], isStreaming: false }
+  try {
+    const parsed = JSON.parse(json)
+    return {
+      texts: Array.isArray(parsed.texts) ? parsed.texts : [],
+      isStreaming: Boolean(parsed.isStreaming)
+    }
+  } catch (error) {
+    return { texts: [], isStreaming: false }
+  }
+}
+
+function logResponseNodes(app, tab, label) {
+  const shouldLog = toBoolean(getEnv('PERPLEXITY_DEBUG_LOG_RESPONSES', 'false'))
+  if (!shouldLog) {
+    return
+  }
+
+  try {
+    const script = `
+      (function(){
+        const nodes = Array.from(document.querySelectorAll('[data-testid="response-text"], div.prose'));
+        const summary = nodes.map((node, index) => {
+          const text = (node.innerText || '').trim();
+          const html = (node.innerHTML || '').trim();
+          return {
+            index,
+            textPreview: text.slice(0, 280),
+            textLength: text.length,
+            htmlPreview: html.slice(0, 280),
+            htmlLength: html.length
+          };
+        });
+        return JSON.stringify(summary);
+      })()
+    `
+    const json = runInTab(app, tab, script)
+    if (json) {
+      console.log('PX_DEBUG_RESPONSE_NODES [' + label + '] ' + json)
+    }
+  } catch (error) {
+    console.log('PX_DEBUG_RESPONSE_NODES_ERROR [' + label + '] ' + (error && error.message ? error.message : String(error)))
+  }
+}
+
+function collectResponseHtml(app, tab) {
+  try {
+    const script = `
+      (function(){
+        const nodes = Array.from(document.querySelectorAll('[data-testid="response-text"], div.prose'));
+        const html = nodes.map(node => node.innerHTML || '');
+        return JSON.stringify(html);
+      })()
+    `
+    const json = runInTab(app, tab, script)
+    if (!json) return []
+    try {
+      const parsed = JSON.parse(json)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+      console.log('PX_DEBUG_RESPONSE_HTML_PARSE_ERROR ' + (error && error.message ? error.message : String(error)))
+      return []
+    }
+  } catch (error) {
+    console.log('PX_DEBUG_RESPONSE_HTML_ERROR ' + (error && error.message ? error.message : String(error)))
+    return []
+  }
+}
+
+function sendPrompt(app, tab, message, options) {
+  const stateJSON = JSON.stringify(buildRawState(message))
+  const injectScript = `
+    (function(){
+      var input = document.querySelector('#ask-input');
+      if (!input || !input.__lexicalEditor) {
+        throw new Error('Perplexity input editor not found');
+      }
+      var editor = input.__lexicalEditor;
+      var state = editor.parseEditorState(${JSON.stringify(stateJSON)});
+      editor.setEditorState(state);
+      if (typeof input.focus === 'function') {
+        input.focus();
+      }
+      try {
+        if (typeof InputEvent === 'function') {
+          input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
+        } else {
+          var inputEvent = document.createEvent('Event');
+          inputEvent.initEvent('input', true, true);
+          input.dispatchEvent(inputEvent);
+        }
+      } catch (error) {
+        // ignore dispatch errors
+      }
+      try {
+        var changeEvent = document.createEvent('Event');
+        changeEvent.initEvent('change', true, true);
+        input.dispatchEvent(changeEvent);
+      } catch (error) {
+        // ignore dispatch errors
+      }
+      return input.innerText;
+    })()
+  `
+
+  const sendScript = `
+    (function(){
+      function isVisible(element) {
+        if (!element) return false;
+        var style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) {
+          return false;
+        }
+        var rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      function isDisabled(element) {
+        if (!element) return true;
+        if (element.disabled) return true;
+        var aria = element.getAttribute('aria-disabled');
+        return aria === 'true' || aria === '1';
+      }
+      function ensureEnabled(element) {
+        if (!element) return;
+        if (element.hasAttribute('disabled')) {
+          element.removeAttribute('disabled');
+        }
+        if (element.getAttribute('aria-disabled') === 'true') {
+          element.setAttribute('aria-disabled', 'false');
+        }
+      }
+      function dispatchPointerSequence(element) {
+        if (!element) return;
+        var events = [
+          ['pointerdown', 'PointerEvent'],
+          ['mousedown', 'MouseEvent'],
+          ['pointerup', 'PointerEvent'],
+          ['mouseup', 'MouseEvent'],
+          ['click', 'MouseEvent']
+        ];
+        var eventInit = { bubbles: true, cancelable: true, composed: true, view: window, button: 0 };
+        for (var idx = 0; idx < events.length; idx++) {
+          var name = events[idx][0];
+          var ctor = events[idx][1];
+          try {
+            if (typeof window[ctor] === 'function') {
+              element.dispatchEvent(new window[ctor](name, eventInit));
+            } else {
+              var legacy = document.createEvent('MouseEvents');
+              legacy.initMouseEvent(name, true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+              element.dispatchEvent(legacy);
+            }
+          } catch (error) {
+            try {
+              element.dispatchEvent(new MouseEvent(name, eventInit));
+            } catch (error2) {
+              // ignore
+            }
+          }
+        }
+      }
+      function triggerEnter(target) {
+        if (!target) return;
+        var eventInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+        var events = ['keydown', 'keypress', 'keyup'];
+        for (var i = 0; i < events.length; i++) {
+          try {
+            target.dispatchEvent(new KeyboardEvent(events[i], eventInit));
+          } catch (error) {
+            try {
+              var legacy = document.createEvent('KeyboardEvent');
+              legacy.initKeyboardEvent(events[i], true, true, window, 'Enter', 0, '', false, 'Enter');
+              target.dispatchEvent(legacy);
+            } catch (error2) {
+              // ignore
+            }
+          }
+        }
+      }
+      var selectors = [
+        '[data-testid="submit-button"]',
+        '[data-testid="followup-submit-button"]',
+        '[data-testid="followups-submit-button"]',
+        '[data-testid="submit-button-no-web"]',
+        '[data-testid="submit-button-web-off"]',
+        '[data-testid="followup-send-button"]',
+        'button[data-testid*="submit"]',
+        'button[aria-label="Submit"]',
+        'button[aria-label="Send"]',
+        'button[type="submit"]'
+      ];
+      var candidates = [];
+      for (var i = 0; i < selectors.length; i++) {
+        var found = Array.prototype.slice.call(document.querySelectorAll(selectors[i]));
+        for (var j = 0; j < found.length; j++) {
+          if (candidates.indexOf(found[j]) === -1) {
+            candidates.push(found[j]);
+          }
+        }
+      }
+      var target = null;
+      for (var k = 0; k < candidates.length; k++) {
+        if (isVisible(candidates[k]) && !isDisabled(candidates[k])) {
+          target = candidates[k];
+          break;
+        }
+      }
+      if (!target) {
+        for (var m = 0; m < candidates.length; m++) {
+          if (isVisible(candidates[m])) {
+            target = candidates[m];
+            break;
+          }
+        }
+      }
+      if (!target) {
+        target = candidates[0] || null;
+      }
+      if (!target) {
+        throw new Error('Submit button not found');
+      }
+      var input = document.querySelector('#ask-input');
+      if (input && typeof input.focus === 'function') {
+        input.focus();
+        triggerEnter(input);
+      } else if (document.activeElement && document.activeElement !== target) {
+        triggerEnter(document.activeElement);
+      }
+      ensureEnabled(target);
+      if (typeof target.focus === 'function') {
+        target.focus();
+      }
+      dispatchPointerSequence(target);
+      if (typeof target.click === 'function') {
+        target.click();
+      }
+      if (target.form) {
+        if (typeof target.form.requestSubmit === 'function') {
+          target.form.requestSubmit(target);
+        } else {
+          target.form.submit();
+        }
+      }
+      return 'submitted';
+    })()
+  `
+
+  runInTab(app, tab, injectScript)
+  runInTab(app, tab, sendScript)
+
+  const initialState = getResponseState(app, tab)
+  const baseline = initialState.texts.length
+  const baselineLast = baseline > 0 ? initialState.texts[baseline - 1] : ''
+  const timeoutMs = options.timeoutMs
+  const pollMs = options.pollMs
+  const stableThreshold = options.stableIterations
+
+  const start = Date.now()
+  let last = initialState.texts[initialState.texts.length - 1] || ''
+  let stable = 0
+  let lastLength = baseline
+
+  while (Date.now() - start < timeoutMs) {
+    delay(pollMs / 1000)
+    const state = getResponseState(app, tab)
+
+    if (state.texts.length === 0) {
+      if (!state.isStreaming) {
+        stable += 1
+      }
+      continue
+    }
+
+    if (state.texts.length <= baseline) {
+      const candidate = state.texts[state.texts.length - 1] || ''
+      if (baseline > 0 && candidate === baselineLast) {
+        stable = 0
+        continue
+      }
+    }
+
+    const latest = state.texts[state.texts.length - 1]
+
+    if (state.texts.length > lastLength) {
+      lastLength = state.texts.length
+      last = latest
+      stable = 0
+      continue
+    }
+
+    if (state.isStreaming) {
+      stable = 0
+      last = latest
+      continue
+    }
+
+    if (latest === last) {
+      stable += 1
+    } else {
+      last = latest
+      stable = 0
+    }
+
+    if (stable >= stableThreshold) {
+      const responsesHtml = collectResponseHtml(app, tab)
+      logResponseNodes(app, tab, 'final')
+      return {
+        prompt: message,
+        response: latest,
+        responses: state.texts,
+        responsesHtml: responsesHtml,
+        responseHtml: responsesHtml.length > 0 ? responsesHtml[responsesHtml.length - 1] : ''
+      }
+    }
+  }
+
+  throw new Error('Timed out waiting for Perplexity response')
+}
+
+function openModelMenu(app, tab) {
+  const script = `
+    (function(){
+      const selectors = [
+        'button[aria-label="GPT-5"]',
+        'button[aria-label="Sonar"]',
+        'button[aria-label^="Claude"]',
+        'button[aria-label*="GPT-5"]',
+        'button[aria-label*="Sonar"]',
+        'button[aria-label*="Claude"]'
+      ];
+      let target = null;
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          target = el;
+          break;
+        }
+      }
+      if (!target) {
+        target = Array.from(document.querySelectorAll('button[aria-label]')).find(btn => {
+          const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+          if (/использован/i.test(label)) return false;
+          return /sonar|gpt|claude|model|sonnet/.test(label);
+        });
+      }
+      if (!target) {
+        return 'model-button-not-found';
+      }
+      target.click();
+      return 'opened';
+    })()
+  `
+  const result = runInTab(app, tab, script)
+  if (result !== 'opened') {
+    throw new Error('Perplexity model selector button not found')
+  }
+  delay(0.6)
+}
+
+function selectModelOption(app, tab, labels) {
+  const script = `
+    (function(){
+      const labels = ${JSON.stringify(labels)}.map(label => label.toLowerCase());
+      const elements = Array.from(document.querySelectorAll('[data-testid^="model-option"], [class*="group/item"], div[role="menuitem"], button[role="menuitem"]'));
+      const snapshot = elements.map(el => ({
+        text: (el.innerText || '').trim(),
+        tag: el.tagName,
+        classes: el.className
+      }));
+      for (const label of labels) {
+        for (let idx = 0; idx < elements.length; idx++) {
+          const item = elements[idx];
+          const text = (item.innerText || '').trim().toLowerCase();
+          if (!text) continue;
+          if (text.includes(label)) {
+            const clickable = item.querySelector('div.duration-quick, button, span, div') || item;
+            const eventInit = { bubbles: true, cancelable: true, composed: true };
+            clickable.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+            clickable.dispatchEvent(new MouseEvent('mousedown', eventInit));
+            clickable.dispatchEvent(new MouseEvent('mouseup', eventInit));
+            clickable.dispatchEvent(new MouseEvent('pointerup', eventInit));
+            clickable.dispatchEvent(new MouseEvent('click', eventInit));
+            return JSON.stringify({ status: 'selected', label: text });
+          }
+        }
+      }
+      return JSON.stringify({ status: 'not-found', items: snapshot });
+    })()
+  `
+  const result = runInTab(app, tab, script)
+  if (!result) {
+    throw new Error('Failed to query Perplexity model list')
+  }
+  try {
+    const parsed = JSON.parse(result)
+    if (parsed.status === 'selected') {
+      delay(0.35)
+      return
+    }
+    throw new Error('Requested model option not found. Available entries: ' + JSON.stringify(parsed.items))
+  } catch (error) {
+    throw new Error('Failed to parse model selection response: ' + result)
+  }
+}
+
+function setReasoningToggle(app, tab, enabled) {
+  const script = `
+    (function(){
+      const items = Array.from(document.querySelectorAll('div[role="menuitem"], button[role="menuitem"], [class*="group/item"]'));
+      const target = items.find(item => /reason|рассуждени/i.test((item.innerText || '').toLowerCase()));
+      if (!target) {
+        return 'reason-option-not-found';
+      }
+      const control = target.querySelector('button[role="switch"], input[type="checkbox"]');
+      if (!control) {
+        return 'reason-switch-not-found';
+      }
+      const state = (control.getAttribute('data-state') || control.getAttribute('aria-checked') || '').toLowerCase();
+      const isOn = state === 'checked' || state === 'true';
+      const shouldEnable = ${enabled ? 'true' : 'false'};
+      if (shouldEnable !== isOn) {
+        control.click();
+        return shouldEnable ? 'enabled' : 'disabled';
+      }
+      return 'unchanged';
+    })()
+  `
+  const result = runInTab(app, tab, script)
+  if (result === 'reason-option-not-found') {
+    throw new Error('Reasoning toggle not available for this model')
+  }
+}
+
+function getCurrentModelLabel(app, tab) {
+  const script = `
+    (function(){
+      const candidates = Array.from(document.querySelectorAll('button[aria-label]'));
+      const target = candidates.find(btn => {
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (/использован/i.test(label)) return false;
+        return /sonar|gpt|claude|model|sonnet/.test(label);
+      });
+      return target ? target.getAttribute('aria-label') : null;
+    })()
+  `
+  return runInTab(app, tab, script)
+}
+
+function ensureModel(app, tab, key) {
+  const config = {
+    sonar: { labels: ['sonar'], reasoning: null },
+    'gpt-5': { labels: ['gpt-5'], reasoning: false },
+    'gpt-5-reasoning': { labels: ['gpt-5'], reasoning: true },
+    'claude-sonnet-4.5-reasoning': { labels: ['claude sonnet 4.5', 'claude sonnet'], reasoning: true }
+  }
+
+  const target = config[key]
+  if (!target) {
+    return
+  }
+
+  const currentLabel = safeLower(getCurrentModelLabel(app, tab))
+  const alreadySelected = currentLabel && target.labels.some(label => currentLabel.includes(label))
+
+  if (!alreadySelected) {
+    openModelMenu(app, tab)
+    selectModelOption(app, tab, target.labels)
+  }
+
+  if (typeof target.reasoning === 'boolean') {
+    openModelMenu(app, tab)
+    try {
+      setReasoningToggle(app, tab, target.reasoning)
+    } catch (error) {
+      throw new Error('Failed to set reasoning toggle: ' + (error && error.message ? error.message : String(error)))
+    }
+  }
+}
+
+function setWebSearch(app, tab, enabled) {
+  const openScript = `
+    (function(){
+      const btn = document.querySelector('[data-testid="sources-switcher-button"]');
+      if (!btn) {
+        return 'sources-button-not-found';
+      }
+      btn.click();
+      return 'opened';
+    })()
+  `
+  const openResult = runInTab(app, tab, openScript)
+  if (openResult !== 'opened') {
+    return
+  }
+  delay(0.45)
+
+  const toggleScript = `
+    (function(){
+      const item = document.querySelector('[data-testid="source-toggle-web"]');
+      if (!item) {
+        return 'web-source-toggle-not-found';
+      }
+      const control = item.querySelector('button[role="switch"], input[type="checkbox"]');
+      if (!control) {
+        return 'web-source-switch-not-found';
+      }
+      const state = (control.getAttribute('data-state') || control.getAttribute('aria-checked') || '').toLowerCase();
+      const isOn = state === 'checked' || state === 'true';
+      const shouldEnable = ${enabled ? 'true' : 'false'};
+      if (shouldEnable !== isOn) {
+        control.click();
+        return shouldEnable ? 'enabled' : 'disabled';
+      }
+      return 'unchanged';
+    })()
+  `
+  runInTab(app, tab, toggleScript)
+
+  runInTab(app, tab, `
+    (function(){
+      const btn = document.querySelector('[data-testid="sources-switcher-button"]');
+      if (btn) {
+        btn.click();
+      }
+    })()
+  `)
+}
+
+function main() {
+  const mode = safeLower(getEnv('PERPLEXITY_MODE', 'attach'))
+  if (!mode) {
+    throw new Error('PERPLEXITY_MODE is required')
+  }
+
+  const Safari = Application('Safari')
+  Safari.includeStandardAdditions = false
+
+  const tab = findPerplexityTab(Safari)
+
+  if (toBoolean(getEnv('PERPLEXITY_NEW_CHAT', 'false'))) {
+    clickNewChat(Safari, tab)
+    delay(0.3)
+  }
+
+  if (mode === 'attach') {
+    const imagePath = getEnv('PERPLEXITY_IMAGE_PATH', '')
+    if (!imagePath) {
+      throw new Error('PERPLEXITY_IMAGE_PATH is required for attachment mode')
+    }
+
+    const baseline = countAttachments(Safari, tab)
+    attachImageFromPath(Safari, tab, imagePath)
+    const attached = waitForAttachment(Safari, tab, baseline)
+    if (!attached) {
+      console.log('Perplexity attachment confirmation timed out; proceeding anyway')
+    }
+    return JSON.stringify({ status: 'attached', detected: attached })
+  }
+
+  if (mode !== 'send') {
+    throw new Error('Unsupported PERPLEXITY_MODE: ' + mode)
+  }
+
+  const modelKey = safeLower(getEnv('PERPLEXITY_MODEL', ''))
+  if (modelKey) {
+    try {
+      ensureModel(Safari, tab, modelKey)
+    } catch (error) {
+      console.log('Perplexity model selection skipped: ' + (error && error.message ? error.message : String(error)))
+    }
+  }
+
+  const webSearchPref = safeLower(getEnv('PERPLEXITY_WEB_SEARCH', ''))
+  if (webSearchPref) {
+    const enableWeb = webSearchPref === 'on' || webSearchPref === 'true' || webSearchPref === '1' || webSearchPref === 'yes'
+    const disableWeb = webSearchPref === 'off' || webSearchPref === 'false' || webSearchPref === '0' || webSearchPref === 'no'
+    if (enableWeb || disableWeb) {
+      setWebSearch(Safari, tab, enableWeb)
+    }
+  }
+
+  const defaultTimeout = modelKey && modelKey.includes('reasoning') ? '480' : '75'
+  const timeoutSeconds = parseFloat(getEnv('PERPLEXITY_TIMEOUT', defaultTimeout))
+  const pollIntervalMs = parseFloat(getEnv('PERPLEXITY_POLL_INTERVAL_MS', '750'))
+  const stableIterations = parseInt(getEnv('PERPLEXITY_STABLE_POLLS', '4'), 10)
+
+  const message = getEnv('PERPLEXITY_MESSAGE', '') || ''
+
+  const result = sendPrompt(Safari, tab, message, {
+    timeoutMs: (Number.isNaN(timeoutSeconds) ? 45 : timeoutSeconds) * 1000,
+    pollMs: Number.isNaN(pollIntervalMs) ? 750 : pollIntervalMs,
+    stableIterations: Number.isNaN(stableIterations) ? 3 : Math.max(stableIterations, 1)
+  })
+
+  return JSON.stringify(result)
+}
+
+try {
+  const output = main()
+  if (typeof output !== 'undefined') {
+    output
+  }
+} catch (error) {
+  const message = error && error.stack ? error.stack : (error && error.message ? error.message : String(error))
+  throw new Error(message)
+}
+

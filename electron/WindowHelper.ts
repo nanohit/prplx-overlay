@@ -71,6 +71,10 @@ export class WindowHelper {
     const workArea = primaryDisplay.workAreaSize
     this.screenWidth = workArea.width
     this.screenHeight = workArea.height
+    this.step = Math.max(
+      Math.round(Math.min(workArea.width, workArea.height) * 0.1),
+      120
+    )
 
     
     const windowSettings: Electron.BrowserWindowConstructorOptions = {
@@ -126,11 +130,11 @@ export class WindowHelper {
     // Show window after loading URL and center it
     this.mainWindow.once('ready-to-show', () => {
       if (this.mainWindow) {
-        // Center the window first
         this.centerWindow()
         this.mainWindow.show()
         this.mainWindow.focus()
         this.mainWindow.setAlwaysOnTop(true)
+        this.mainWindow.webContents.send('focus-chat-input')
         console.log("Window is now visible and centered")
       }
     })
@@ -208,7 +212,17 @@ export class WindowHelper {
       })
     }
 
-    this.mainWindow.showInactive()
+    this.mainWindow.show()
+    this.mainWindow.focus()
+    this.mainWindow.webContents.focus()
+
+    if (process.platform === "darwin") {
+      this.mainWindow.setAlwaysOnTop(true, "floating")
+    } else {
+      this.mainWindow.setAlwaysOnTop(true)
+    }
+
+    this.mainWindow.webContents.send("focus-chat-input")
 
     this.isWindowVisible = true
   }
@@ -234,23 +248,32 @@ export class WindowHelper {
     const windowWidth = windowBounds.width || 400
     const windowHeight = windowBounds.height || 600
     
-    // Calculate center position
-    const centerX = Math.floor((workArea.width - windowWidth) / 2)
-    const centerY = Math.floor((workArea.height - windowHeight) / 2)
+    const centerX = Math.max(
+      0,
+      Math.min(
+        workArea.width - windowWidth,
+        Math.floor(workArea.width * 0.1)
+      )
+    )
+    const desiredTop = Math.max(
+      0,
+      Math.min(
+        Math.floor(workArea.height * 0.15),
+        workArea.height - windowHeight
+      )
+    )
     
-    // Set window position
     this.mainWindow.setBounds({
       x: centerX,
-      y: centerY,
+      y: desiredTop,
       width: windowWidth,
       height: windowHeight
     })
     
-    // Update internal state
-    this.windowPosition = { x: centerX, y: centerY }
+    this.windowPosition = { x: centerX, y: desiredTop }
     this.windowSize = { width: windowWidth, height: windowHeight }
     this.currentX = centerX
-    this.currentY = centerY
+    this.currentY = desiredTop
   }
 
   public centerAndShowWindow(): void {
@@ -263,6 +286,7 @@ export class WindowHelper {
     this.mainWindow.show()
     this.mainWindow.focus()
     this.mainWindow.setAlwaysOnTop(true)
+    this.mainWindow.webContents.send('focus-chat-input')
     this.isWindowVisible = true
     
     console.log(`Window centered and shown`)

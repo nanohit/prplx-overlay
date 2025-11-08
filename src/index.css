@@ -2,63 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Liquid Glass Effect Base */
+:root {
+  --overlay-base: rgba(15, 21, 38, 0.72);
+  --overlay-elevated: rgba(15, 21, 38, 0.22);
+  --overlay-raised: rgba(15, 21, 38, 0.72);
+  --overlay-border: rgba(255, 255, 255, 0.1);
+  --overlay-border-strong: rgba(255, 255, 255, 0.18);
+  --overlay-text: rgba(244, 247, 255, 0.92);
+  --overlay-muted: rgba(178, 190, 219, 0.72);
+  --overlay-shadow: none;
+  --overlay-accent: #3b82f6;
+  --overlay-accent-soft: rgba(59, 130, 246, 0.28);
+  --overlay-success: rgba(16, 185, 129, 0.7);
+}
+
+body {
+  color: var(--overlay-text);
+}
+
 .liquid-glass {
-  background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(16px) saturate(180%) brightness(120%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(120%);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 1rem;
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  background: var(--overlay-base);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--overlay-border);
+  border-radius: 18px;
+  box-shadow: var(--overlay-shadow);
   position: relative;
   overflow: hidden;
 }
 
-/* Enhanced liquid glass with shimmer effect */
 .liquid-glass::before {
-  content: '';
+  content: "";
   position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.1),
-    transparent
-  );
-  animation: shimmer 3s ease-in-out infinite;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.02);
   pointer-events: none;
 }
 
-@keyframes shimmer {
-  0% {
-    left: -100%;
-  }
-  50% {
-    left: 100%;
-  }
-  100% {
-    left: 100%;
-  }
+.liquid-glass.chat-container {
+  background: var(--overlay-base);
+  border: 1px solid var(--overlay-border-strong);
+  box-shadow: var(--overlay-shadow);
 }
 
-/* Fallback for browsers without backdrop-filter support */
-@supports not (backdrop-filter: blur()) {
-  .liquid-glass {
-    background: rgba(255, 255, 255, 0.5);
-    border: 2px solid rgba(255, 255, 255, 0.6);
-  }
+.liquid-glass-bar,
+.liquid-glass-dark {
+  background: var(--overlay-base);
+  border: 1px solid var(--overlay-border);
+  box-shadow: var(--overlay-shadow);
 }
 
-/* Add a subtle outline to ensure visibility */
-.liquid-glass:before {
-  outline: 1px solid rgba(255, 255, 255, 0.1);
-  outline-offset: -1px;
+.glass-content {
+  position: relative;
+  z-index: 1;
 }
 
 .draggable-area {
@@ -69,99 +65,187 @@
   cursor: move;
   position: relative;
   z-index: 1000;
-  border-radius: 1rem 1rem 0 0;
+  border-radius: 18px 18px 0 0;
 }
 
-/* Make sure buttons and interactive elements are not draggable */
-button, input, select, textarea, .interactive {
+button,
+input,
+select,
+textarea,
+.interactive {
   -webkit-app-region: no-drag;
 }
 
-/* Override for the liquid glass bar - make it draggable */
 .liquid-glass.draggable-area {
   -webkit-app-region: drag;
   cursor: move;
 }
 
-/* But keep buttons inside clickable */
 .liquid-glass.draggable-area button {
   -webkit-app-region: no-drag;
   cursor: pointer;
 }
 
-/* Add visual feedback for draggable area */
 .draggable-area:hover {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  background: rgba(21, 28, 46, 0.2);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-/* Dark theme liquid glass variant */
-.liquid-glass-dark {
-  background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(16px) saturate(180%) brightness(80%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(80%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+.overlay-header {
+  background: var(--overlay-elevated);
+  border-bottom: 1px solid var(--overlay-border);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  -webkit-app-region: drag;
+  user-select: none;
+  cursor: move;
 }
 
-/* Ensure content is not blurred */
-.glass-content {
-  position: relative;
-  z-index: 1;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+.overlay-section {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-/* Chat container specific styling */
-.liquid-glass.chat-container {
-  min-height: auto;
-  height: auto;
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px) saturate(200%) brightness(110%);
-  -webkit-backdrop-filter: blur(20px) saturate(200%) brightness(110%);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 
-    0 12px 40px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+.overlay-divider {
+  border-color: var(--overlay-border-strong) !important;
 }
 
-/* Thin bar variant of liquid glass - for command bar */
-.liquid-glass-bar {
-  background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(16px) saturate(180%) brightness(120%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(120%);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 1rem;
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
-  position: relative;
-  overflow: hidden;
-  height: 32px !important;
-  min-height: 32px !important;
-  max-height: 32px !important;
+.overlay-button {
+  background: var(--overlay-raised);
+  border: none;
+  color: var(--overlay-muted);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease,
+    box-shadow 0.2s ease, transform 0.2s ease;
 }
 
-/* Shimmer effect for bar variant */
-.liquid-glass-bar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.1),
-    transparent
-  );
-  animation: shimmer 3s ease-in-out infinite;
-  pointer-events: none;
+.overlay-button:hover {
+  background: rgba(44, 54, 82, 0.55);
+  color: var(--overlay-text);
+}
+
+.overlay-button-active {
+  background: var(--overlay-accent-soft);
+  color: var(--overlay-text);
+}
+
+.overlay-toggle-active {
+  background: var(--overlay-raised);
+  color: var(--overlay-accent);
+  font-weight: 600;
+}
+
+.overlay-pill {
+  background: transparent;
+  border: none;
+  color: var(--overlay-muted);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.overlay-pill:hover {
+  background: rgba(40, 49, 72, 0.4);
+  color: var(--overlay-text);
+}
+
+.overlay-input {
+  background: transparent;
+  border: none;
+  color: var(--overlay-text);
+  border-radius: 12px;
+  padding: 0.5rem 0;
+  transition: color 0.2s ease;
+}
+
+.overlay-input::placeholder {
+  color: rgba(178, 190, 219, 0.5);
+}
+
+.overlay-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.overlay-code {
+  background: transparent;
+  border: none;
+  color: var(--overlay-text);
+  border-radius: 12px;
+}
+
+.overlay-code-copy {
+  background: transparent;
+  color: rgba(226, 232, 240, 0.7);
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  transition: color 0.2s ease;
+}
+
+.overlay-code-copy:hover {
+  color: #f8fbff;
+}
+
+.overlay-send {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.45), rgba(37, 99, 235, 0.45));
+  border: none;
+  color: #f8fbff;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.overlay-send:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.overlay-send:disabled {
+  opacity: 0.4;
+  transform: none;
+  filter: none;
+}
+
+.chat-bubble {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  color: var(--overlay-text);
+}
+
+.chat-bubble-user {
+  background: transparent;
+  color: #ecf2ff;
+}
+
+.chat-bubble-system {
+  background: transparent;
+  color: rgba(252, 211, 77, 0.85);
+}
+
+.chat-copy-button {
+  background: transparent;
+  color: rgba(219, 234, 254, 0.7);
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  transition: color 0.2s ease;
+}
+
+.chat-copy-button:hover {
+  color: #f8fbff;
+}
+
+.overlay-tooltip {
+  background: var(--overlay-base);
+  border: none;
+  color: var(--overlay-text);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.overlay-tooltip strong {
+  color: var(--overlay-text);
 }

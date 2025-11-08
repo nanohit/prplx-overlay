@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "react-query"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism"
+import MarkdownContent from "../components/ui/MarkdownContent"
 
 import ScreenshotQueue from "../components/Queue/ScreenshotQueue"
 import {
@@ -40,7 +41,11 @@ export const ContentSection = ({
       </div>
     ) : (
       <div className="text-[13px] leading-[1.4] text-gray-100 max-w-[600px]">
-        {content}
+        {typeof content === "string" ? (
+          <MarkdownContent content={content} />
+        ) : (
+          content
+        )}
       </div>
     )}
   </div>
@@ -75,9 +80,11 @@ const SolutionSection = ({
           customStyle={{
             maxWidth: "100%",
             margin: 0,
-            padding: "1rem",
+            padding: "0.25rem 0",
             whiteSpace: "pre-wrap",
-            wordBreak: "break-all"
+            wordBreak: "break-word",
+            background: "transparent",
+            boxShadow: "none"
           }}
           wrapLongLines={true}
         >
@@ -486,76 +493,72 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
           />
 
           {/* Main Content - Modified width constraints */}
-          <div className="w-full text-sm text-black bg-black/60 rounded-md">
-            <div className="rounded-lg overflow-hidden">
-              <div className="px-4 py-3 space-y-4 max-w-full">
-                {/* Show Screenshot or Audio Result as main output if validation_type is manual */}
-                {problemStatementData?.validation_type === "manual" ? (
-                  <ContentSection
-                    title={problemStatementData?.output_format?.subtype === "voice" ? "Audio Result" : "Screenshot Result"}
-                    content={problemStatementData.problem_statement}
-                    isLoading={false}
-                  />
-                ) : (
+          <div className="w-full text-sm text-white px-3 py-2 space-y-4">
+            {/* Show Screenshot or Audio Result as main output if validation_type is manual */}
+            {problemStatementData?.validation_type === "manual" ? (
+              <ContentSection
+                title={problemStatementData?.output_format?.subtype === "voice" ? "Audio Result" : "Screenshot Result"}
+                content={problemStatementData.problem_statement}
+                isLoading={false}
+              />
+            ) : (
+              <>
+                {/* Problem Statement Section - Only for non-manual */}
+                <ContentSection
+                  title={problemStatementData?.output_format?.subtype === "voice" ? "Voice Input" : "Problem Statement"}
+                  content={problemStatementData?.problem_statement}
+                  isLoading={!problemStatementData}
+                />
+                {/* Show loading state when waiting for solution */}
+                {problemStatementData && !solutionData && (
+                  <div className="mt-3">
+                    <p className="text-xs text-white/70">
+                      {problemStatementData?.output_format?.subtype === "voice" 
+                        ? "Processing voice input..." 
+                        : "Generating solutions..."}
+                    </p>
+                  </div>
+                )}
+                {/* Solution Sections (legacy, only for non-manual) */}
+                {solutionData && (
                   <>
-                    {/* Problem Statement Section - Only for non-manual */}
                     <ContentSection
-                      title={problemStatementData?.output_format?.subtype === "voice" ? "Voice Input" : "Problem Statement"}
-                      content={problemStatementData?.problem_statement}
-                      isLoading={!problemStatementData}
-                    />
-                    {/* Show loading state when waiting for solution */}
-                    {problemStatementData && !solutionData && (
-                      <div className="mt-4 flex">
-                        <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-                          {problemStatementData?.output_format?.subtype === "voice" 
-                            ? "Processing voice input..." 
-                            : "Generating solutions..."}
-                        </p>
-                      </div>
-                    )}
-                    {/* Solution Sections (legacy, only for non-manual) */}
-                    {solutionData && (
-                      <>
-                        <ContentSection
-                          title="Analysis"
-                          content={
-                            thoughtsData && (
-                              <div className="space-y-3">
-                                <div className="space-y-1">
-                                  {thoughtsData.map((thought, index) => (
-                                    <div
-                                      key={index}
-                                      className="flex items-start gap-2"
-                                    >
-                                      <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-                                      <div>{thought}</div>
-                                    </div>
-                                  ))}
+                      title="Analysis"
+                      content={
+                        thoughtsData && (
+                          <div className="space-y-3">
+                            <div className="space-y-1">
+                              {thoughtsData.map((thought, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-start gap-2"
+                                >
+                                  <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
+                                  <div>{thought}</div>
                                 </div>
-                              </div>
-                            )
-                          }
-                          isLoading={!thoughtsData}
-                        />
-                        <SolutionSection
-                          title={problemStatementData?.output_format?.subtype === "voice" ? "Response" : "Solution"}
-                          content={solutionData}
-                          isLoading={!solutionData}
-                        />
-                        {problemStatementData?.output_format?.subtype !== "voice" && (
-                          <ComplexitySection
-                            timeComplexity={timeComplexityData}
-                            spaceComplexity={spaceComplexityData}
-                            isLoading={!timeComplexityData || !spaceComplexityData}
-                          />
-                        )}
-                      </>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      }
+                      isLoading={!thoughtsData}
+                    />
+                    <SolutionSection
+                      title={problemStatementData?.output_format?.subtype === "voice" ? "Response" : "Solution"}
+                      content={solutionData}
+                      isLoading={!solutionData}
+                    />
+                    {problemStatementData?.output_format?.subtype !== "voice" && (
+                      <ComplexitySection
+                        timeComplexity={timeComplexityData}
+                        spaceComplexity={spaceComplexityData}
+                        isLoading={!timeComplexityData || !spaceComplexityData}
+                      />
                     )}
                   </>
                 )}
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </div>
       )}

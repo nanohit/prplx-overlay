@@ -1,9 +1,19 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage } from "electron"
+import { app, BrowserWindow, systemPreferences } from "electron"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { ProcessingHelper } from "./ProcessingHelper"
+import { attachPerplexityImage, sendPerplexityPromptWithAttachments } from "./PerplexityHelper"
+import { SelectionHelper } from "./SelectionHelper"
+
+type PerplexityModelKey = "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+
+interface PerplexityPreferences {
+  model: PerplexityModelKey
+  webSearch: boolean
+  shouldStartNewChat: boolean
+}
 
 export class AppState {
   private static instance: AppState | null = null
@@ -12,7 +22,8 @@ export class AppState {
   private screenshotHelper: ScreenshotHelper
   public shortcutsHelper: ShortcutsHelper
   public processingHelper: ProcessingHelper
-  private tray: Tray | null = null
+  private selectionHelper: SelectionHelper
+  private hasShownScreenPermissionWarning: boolean = false
 
   // View management
   private view: "queue" | "solutions" = "queue"
@@ -26,6 +37,14 @@ export class AppState {
   } | null = null // Allow null
 
   private hasDebugged: boolean = false
+
+  private pendingAttachment: { path: string; preview: string } | null = null
+
+  private perplexityPreferences: PerplexityPreferences = {
+    model: "sonar",
+    webSearch: false,
+    shouldStartNewChat: true
+  }
 
   // Processing events
   public readonly PROCESSING_EVENTS = {
@@ -57,6 +76,9 @@ export class AppState {
 
     // Initialize ShortcutsHelper
     this.shortcutsHelper = new ShortcutsHelper(this)
+
+    // Initialize SelectionHelper
+    this.selectionHelper = new SelectionHelper()
   }
 
   public static getInstance(): AppState {
@@ -139,11 +161,89 @@ export class AppState {
 
     // Reset view to initial state
     this.setView("queue")
+
+    this.pendingAttachment = null
+  }
+
+  public updatePerplexityPreferences(preferences: Partial<PerplexityPreferences>): void {
+    this.perplexityPreferences = {
+      ...this.perplexityPreferences,
+      ...preferences
+    }
+  }
+
+  public getPerplexityPreferences(): PerplexityPreferences {
+    return { ...this.perplexityPreferences }
+  }
+
+  public getPendingAttachment(): { path: string; preview: string } | null {
+    return this.pendingAttachment ? { ...this.pendingAttachment } : null
+  }
+
+  public clearPendingAttachment(): void {
+    this.pendingAttachment = null
+  }
+
+  private async ensureScreenCapturePermission(): Promise<void> {
+    if (process.platform !== "darwin") {
+      return
+    }
+
+    const getMediaStatus = (systemPreferences as any).getMediaAccessStatus?.bind(systemPreferences)
+    const askForMediaAccess = (systemPreferences as any).askForMediaAccess?.bind(systemPreferences)
+
+    if (typeof getMediaStatus !== "function") {
+      return
+    }
+
+    let status: string
+    try {
+      status = getMediaStatus("screen")
+    } catch (error) {
+      console.warn("Unable to query screen capture permission status:", error)
+      return
+    }
+
+    if (status === "granted") {
+      return
+    }
+
+    if (status === "not-determined" && typeof askForMediaAccess === "function") {
+      try {
+        const granted = await askForMediaAccess("screen")
+        if (granted) {
+          return
+        }
+        status = getMediaStatus("screen")
+      } catch (error) {
+        console.warn("Failed to request screen capture permission:", error)
+        status = getMediaStatus("screen")
+      }
+    }
+
+    if (status !== "granted") {
+      const message =
+        "Screen recording permission is required. Open System Settings → Privacy & Security → Screen Recording and enable \"Interview Coder\" (then restart the app)."
+
+      const mainWindow = this.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("perplexity-attachment-error", message)
+      }
+
+      if (!this.hasShownScreenPermissionWarning) {
+        this.hasShownScreenPermissionWarning = true
+        console.warn(message)
+      }
+
+      throw new Error(message)
+    }
   }
 
   // Screenshot management methods
   public async takeScreenshot(): Promise<string> {
     if (!this.getMainWindow()) throw new Error("No main window available")
+
+    await this.ensureScreenCapturePermission()
 
     const screenshotPath = await this.screenshotHelper.takeScreenshot(
       () => this.hideMainWindow(),
@@ -151,6 +251,100 @@ export class AppState {
     )
 
     return screenshotPath
+  }
+
+  public async startCutScreenshotFlow(): Promise<void> {
+    const mainWindow = this.getMainWindow()
+    if (!mainWindow) {
+      console.warn("No main window for cut screenshot flow")
+      return
+    }
+
+    await this.ensureScreenCapturePermission()
+
+    let overlayRestored = true
+
+    try {
+      const selection = await this.selectionHelper.startSelection()
+      if (!selection) {
+        return
+      }
+
+      // Small delay to ensure overlay windows are fully removed
+      await this.delay(50)
+
+      const screenshotPath = await this.screenshotHelper.captureRegion(selection)
+      const preview = await this.getImagePreview(screenshotPath)
+
+      this.pendingAttachment = { path: screenshotPath, preview }
+
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("perplexity-attachment-ready", {
+          path: screenshotPath,
+          preview
+        })
+        mainWindow.webContents.send("screenshot-taken", {
+          path: screenshotPath,
+          preview,
+          source: "cut-selection"
+        })
+      }
+
+      await attachPerplexityImage(screenshotPath, {
+        newChat: this.perplexityPreferences.shouldStartNewChat
+      })
+
+      if (this.perplexityPreferences.shouldStartNewChat) {
+        this.perplexityPreferences.shouldStartNewChat = false
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("perplexity-new-chat-started")
+        }
+      }
+
+    } catch (error: any) {
+      console.error("Cut screenshot flow failed:", error)
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+          "perplexity-attachment-error",
+          error?.message ?? String(error)
+        )
+      }
+      throw error
+    } finally {
+    }
+  }
+
+  public async sendPendingAttachment(
+    message: string,
+    options?: { timeoutSeconds?: number }
+  ): Promise<{ prompt: string; response: string; responses: string[] }> {
+    const mainWindow = this.getMainWindow()
+    if (!mainWindow) {
+      throw new Error("Main window not available")
+    }
+
+    if (!this.pendingAttachment) {
+      throw new Error("No pending attachment to send")
+    }
+
+    try {
+      const normalizedMessage = message && message.trim().length > 0 ? message : "[image attached]"
+      const result = await sendPerplexityPromptWithAttachments(normalizedMessage, {
+        newChat: this.perplexityPreferences.shouldStartNewChat,
+        model: this.perplexityPreferences.model,
+        webSearch: this.perplexityPreferences.webSearch,
+        timeoutSeconds: options?.timeoutSeconds
+      })
+
+      this.pendingAttachment = null
+      if (this.perplexityPreferences.shouldStartNewChat) {
+        this.perplexityPreferences.shouldStartNewChat = false
+      }
+
+      return result
+    } catch (error) {
+      throw error
+    }
   }
 
   public async getImagePreview(filepath: string): Promise<string> {
@@ -182,80 +376,8 @@ export class AppState {
     this.windowHelper.centerAndShowWindow()
   }
 
-  public createTray(): void {
-    // Create a simple tray icon
-    const image = nativeImage.createEmpty()
-    
-    // Try to use a system template image for better integration
-    let trayImage = image
-    try {
-      // Create a minimal icon - just use an empty image and set the title
-      trayImage = nativeImage.createFromBuffer(Buffer.alloc(0))
-    } catch (error) {
-      console.log("Using empty tray image")
-      trayImage = nativeImage.createEmpty()
-    }
-    
-    this.tray = new Tray(trayImage)
-    
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Show Interview Coder',
-        click: () => {
-          this.centerAndShowWindow()
-        }
-      },
-      {
-        label: 'Toggle Window',
-        click: () => {
-          this.toggleMainWindow()
-        }
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: 'Take Screenshot (Cmd+H)',
-        click: async () => {
-          try {
-            const screenshotPath = await this.takeScreenshot()
-            const preview = await this.getImagePreview(screenshotPath)
-            const mainWindow = this.getMainWindow()
-            if (mainWindow) {
-              mainWindow.webContents.send("screenshot-taken", {
-                path: screenshotPath,
-                preview
-              })
-            }
-          } catch (error) {
-            console.error("Error taking screenshot from tray:", error)
-          }
-        }
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: 'Quit',
-        accelerator: 'Command+Q',
-        click: () => {
-          app.quit()
-        }
-      }
-    ])
-    
-    this.tray.setToolTip('Interview Coder - Press Cmd+Shift+Space to show')
-    this.tray.setContextMenu(contextMenu)
-    
-    // Set a title for macOS (will appear in menu bar)
-    if (process.platform === 'darwin') {
-      this.tray.setTitle('IC')
-    }
-    
-    // Double-click to show window
-    this.tray.on('double-click', () => {
-      this.centerAndShowWindow()
-    })
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   public setHasDebugged(value: boolean): void {
@@ -277,7 +399,6 @@ async function initializeApp() {
   app.whenReady().then(() => {
     console.log("App is ready")
     appState.createWindow()
-    appState.createTray()
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
   })
@@ -296,7 +417,10 @@ async function initializeApp() {
     }
   })
 
-  app.dock?.hide() // Hide dock icon (optional)
+  if (process.platform === "darwin") {
+    app.dock?.hide()
+    app.setActivationPolicy("accessory")
+  }
   app.commandLine.appendSwitch("disable-background-timer-throttling")
 }
 

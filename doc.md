@@ -61,3 +61,32 @@ Roy was trolling interviews, but here's the thing—this invisible overlay tech 
 ### Want to Use This for Good?
 
 Everything's open-sourced right [here](https://github.com/Prat011/free-cluely). If this sounds like something your team could use ethically and effectively, reach out. Let's build something legit. You can contact me at prathit3.14@gmail.com
+
+---
+
+## Safari Perplexity Automation (Experimental)
+
+> ⚠️ Local experiment for personal testing only. It relies on the live Perplexity UI and may break without warning.
+
+1. **Enable JavaScript from Apple Events** in Safari: Settings → Advanced → enable the Develop menu, then Develop → “Allow JavaScript from Apple Events”.
+2. **Open Perplexity** in a normal Safari window, solve any Cloudflare challenge, and stay logged in. (Private windows aren’t accessible via Apple Events.)
+3. **Send a prompt from the terminal**:
+
+   ```bash
+   PERPLEXITY_MESSAGE='your prompt here' ./scripts/perplexity_send.jxa
+   ```
+
+   - The script finds the first Safari tab whose URL contains `perplexity.ai` and makes it active.
+   - It injects the message directly into the Lexical editor that powers the chat box.
+   - It programmatically clicks the submit button; Perplexity handles the rest.
+   - The latest reply is captured from the UI and printed to stdout. Use `PERPLEXITY_OUTPUT=json` to receive the full prompt/response bundle.
+   - Set `PERPLEXITY_NEW_CHAT=true` to trigger a fresh conversation before sending the prompt.
+   - Optional tuning:
+     - `PERPLEXITY_TIMEOUT` (seconds, default `45`)
+     - `PERPLEXITY_POLL_INTERVAL_MS` (milliseconds between DOM polls, default `750`)
+     - `PERPLEXITY_STABLE_POLLS` (number of identical polls before considering the response complete, default `3`)
+
+4. **Troubleshooting**
+   - If you see “input editor not found”, make sure the tab is loaded and no CAPTCHA is pending.
+   - Returned text includes citation markers (e.g. `source+2​`). Strip or post-process them in your overlay if needed.
+   - Any DOM change on perplexity.ai will require updating the selector logic in `scripts/perplexity_send.jxa`.

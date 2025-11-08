@@ -372,44 +372,40 @@ const Debug: React.FC<DebugProps> = ({ isProcessing, setIsProcessing }) => {
       />
 
       {/* Main Content */}
-      <div className="w-full text-sm text-black bg-black/60 rounded-md">
-        <div className="rounded-lg overflow-hidden">
-          <div className="px-4 py-3 space-y-4">
-            {/* Thoughts Section */}
-            <ContentSection
-              title="What I Changed"
-              content={
-                thoughtsData && (
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      {thoughtsData.map((thought, index) => (
-                        <div key={index} className="flex items-start gap-2">
-                          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-                          <div>{thought}</div>
-                        </div>
-                      ))}
+      <div className="w-full text-sm text-white px-3 py-2 space-y-4">
+        {/* Thoughts Section */}
+        <ContentSection
+          title="What I Changed"
+          content={
+            thoughtsData && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  {thoughtsData.map((thought, index) => (
+                    <div key={index} className="flex items-start gap-2">
+                      <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
+                      <div>{thought}</div>
                     </div>
-                  </div>
-                )
-              }
-              isLoading={!thoughtsData}
-            />
+                  ))}
+                </div>
+              </div>
+            )
+          }
+          isLoading={!thoughtsData}
+        />
 
-            {/* Code Comparison Section */}
-            <CodeComparisonSection
-              oldCode={oldCode}
-              newCode={newCode}
-              isLoading={!oldCode || !newCode}
-            />
+        {/* Code Comparison Section */}
+        <CodeComparisonSection
+          oldCode={oldCode}
+          newCode={newCode}
+          isLoading={!oldCode || !newCode}
+        />
 
-            {/* Complexity Section */}
-            <ComplexitySection
-              timeComplexity={timeComplexityData}
-              spaceComplexity={spaceComplexityData}
-              isLoading={!timeComplexityData || !spaceComplexityData}
-            />
-          </div>
-        </div>
+        {/* Complexity Section */}
+        <ComplexitySection
+          timeComplexity={timeComplexityData}
+          spaceComplexity={spaceComplexityData}
+          isLoading={!timeComplexityData || !spaceComplexityData}
+        />
       </div>
     </div>
   )

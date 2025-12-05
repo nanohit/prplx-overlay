@@ -149,3 +149,4 @@ This will start both the Vite dev server and Electron with hot-reload.
 - **screenshot-desktop** - Screen capture
 
 The app uses JXA scripts to communicate with Safari and send prompts to Perplexity AI. This is why Safari must have "Allow JavaScript from Apple Events" enabled.
+

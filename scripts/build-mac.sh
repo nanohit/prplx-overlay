@@ -87,3 +87,4 @@ echo "      Enable 'Perplexity Overlay'"
 echo "   3. In Safari: Settings → Advanced → Enable 'Show Develop menu'"
 echo "      Then: Develop → Allow JavaScript from Apple Events"
 echo ""
+

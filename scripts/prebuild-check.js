@@ -142,3 +142,4 @@ if (checks.length === 0) {
   console.log('Please fix the issues above before building.');
   process.exit(1);
 }
+

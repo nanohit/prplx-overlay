@@ -90,6 +90,25 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.toggleMainWindow()
   })
 
+  ipcMain.handle("overlay-enter-capture-mode", async () => {
+    appState.enterCaptureMode()
+    return { active: true }
+  })
+
+  ipcMain.handle("overlay-exit-capture-mode", async () => {
+    appState.exitCaptureMode()
+    return { active: false }
+  })
+
+  ipcMain.handle("overlay-toggle-capture-mode", async () => {
+    appState.toggleCaptureMode()
+    return { active: appState.isCaptureModeActive() }
+  })
+
+  ipcMain.handle("overlay-capture-mode-state", async () => {
+    return { active: appState.isCaptureModeActive() }
+  })
+
   ipcMain.handle("force-open-perplexity", async () => {
     const url = "https://www.perplexity.ai"
     try {

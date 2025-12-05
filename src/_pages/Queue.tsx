@@ -232,6 +232,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const chatInputRef = useRef<HTMLInputElement>(null)
   const [shouldStartNewChat, setShouldStartNewChat] = useState(true)
   const [isThinkAppended, setIsThinkAppended] = useState(false)
+  const [isOverlayActive, setIsOverlayActive] = useState(false)
   const [activeModelLabel, setActiveModelLabel] = useState<string | null>(null)
   const [perplexityModel, setPerplexityModel] = useState<PerplexityModelKey>("sonar")
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
@@ -240,9 +241,23 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const [attachedMessageIndexes, setAttachedMessageIndexes] = useState<number[]>([])
   const [attachmentSubmitting, setAttachmentSubmitting] = useState(false)
   const isStreaming = useMemo(() => chatMessages.some((msg) => msg.streaming), [chatMessages])
+  const chatPlaceholder = pendingAttachment
+    ? "Screenshot captured — add context or press Enter to send"
+    : "Input field..."
+
+  const showToast = useCallback(
+    (title: string, description: string, variant: ToastVariant) => {
+      if (variant === "neutral") {
+        return
+      }
+      setToastMessage({ title, description, variant })
+      setToastOpen(true)
+    },
+    []
+  )
 
   const { data: screenshots = [], refetch } = useQuery<Array<{ path: string; preview: string }>, Error>(
-    ["screenshots"],
+    "screenshots",
     async () => {
       try {
         const existing = await window.electronAPI.getScreenshots()
@@ -268,17 +283,6 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
       shouldStartNewChat
     })
   }, [perplexityModel, webSearchEnabled, shouldStartNewChat])
-
-  const showToast = useCallback(
-    (title: string, description: string, variant: ToastVariant) => {
-    if (variant === "neutral") {
-      return
-    }
-    setToastMessage({ title, description, variant })
-    setToastOpen(true)
-    },
-    []
-  )
 
   const handleDeleteScreenshot = async (index: number) => {
     const screenshotToDelete = screenshots[index]
@@ -618,6 +622,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   }, [isStreaming])
 
   useEffect(() => {
+    const unsubscribeCaptureMode = window.electronAPI.onOverlayCaptureModeChange?.((active) => {
+      setIsOverlayActive(Boolean(active))
+    })
+
     const unsubscribeReady = window.electronAPI.onPerplexityAttachmentReady((data) => {
       setPendingAttachment(data)
       setChatInput((prev) => prev)
@@ -634,9 +642,6 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
       setShowAttachmentPreview(false)
       setAttachmentSubmitting(false)
       showToast("Attachment Failed", error || "Could not attach screenshot", "error")
-      setChatLoading(false)
-      setActiveModelLabel(null)
-      setTimeout(() => chatInputRef.current?.focus(), 80)
     })
 
     const unsubscribeNewChatStarted = window.electronAPI.onPerplexityNewChatStarted(() => {
@@ -648,8 +653,9 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
       unsubscribeReady && unsubscribeReady()
       unsubscribeError && unsubscribeError()
       unsubscribeNewChatStarted && unsubscribeNewChatStarted()
+      unsubscribeCaptureMode && unsubscribeCaptureMode()
     }
-  }, [refetch, showToast])
+  }, [refetch, showToast, setView, isStreaming])
 
   // Seamless screenshot-to-LLM flow
   useEffect(() => {
@@ -712,16 +718,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     (value: string) => {
       setChatInput(value)
       const hasSuffixAtEnd = value.endsWith(THINK_SUFFIX)
-      if (hasSuffixAtEnd !== isThinkAppended) {
-        setIsThinkAppended(hasSuffixAtEnd)
-      }
+      setIsThinkAppended(hasSuffixAtEnd)
     },
-    [isThinkAppended]
+    []
   )
-
-  const chatPlaceholder = pendingAttachment
-    ? "Screenshot captured — add context or press Enter to send"
-    : "Input field..."
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -802,11 +802,13 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   }, [handlePerplexityNewChat, handleModelSelect, handleWebSearchToggle, handleToggleThink])
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      chatInputRef.current?.focus()
-    }, 120)
+    if (!isOverlayActive) {
+      chatInputRef.current?.blur()
+      return
+    }
+    const timer = setTimeout(() => chatInputRef.current?.focus(), 80)
     return () => clearTimeout(timer)
-  }, [])
+  }, [isOverlayActive])
 
   useEffect(() => {
     const unsubscribeFocus = window.electronAPI.onFocusChatInput(() => {
@@ -822,10 +824,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     })
 
     return () => {
-      unsubscribeFocus && unsubscribeFocus()
-      unsubscribeModel && unsubscribeModel()
-      unsubscribeWeb && unsubscribeWeb()
-  }
+      unsubscribeFocus()
+      unsubscribeModel()
+      unsubscribeWeb()
+    }
   }, [handleModelSelect, handleWebSearchToggle])
 
   return (
@@ -868,6 +870,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                   ))}
                 </div>
                 <div className="flex items-center gap-1">
+                  <span
+                    className={`overlay-mode-indicator ${isOverlayActive ? "overlay-mode-indicator--active" : "overlay-mode-indicator--passive"}`}
+                    title={isOverlayActive ? "Overlay active" : "Overlay passive"}
+                  />
                   <button
                     type="button"
                     onClick={handleToggleThink}

@@ -2,6 +2,7 @@
 import { BrowserWindow, screen } from "electron"
 import { AppState } from "main"
 import path from "node:path"
+import { execFile, execSync } from "node:child_process"
 
 const isDev = process.env.NODE_ENV === "development"
 
@@ -22,6 +23,9 @@ export class WindowHelper {
   private step: number = 0
   private currentX: number = 0
   private currentY: number = 0
+  private captureMode: boolean = false
+  private safariRefocusTimer: NodeJS.Timeout | null = null
+  private previousAppBundleId: string | null = null
 
   constructor(appState: AppState) {
     this.appState = appState
@@ -77,6 +81,8 @@ export class WindowHelper {
     )
 
     
+    const isMac = process.platform === "darwin"
+
     const windowSettings: Electron.BrowserWindowConstructorOptions = {
       width: 400,
       height: 600,
@@ -94,9 +100,16 @@ export class WindowHelper {
       fullscreenable: false,
       hasShadow: false,
       backgroundColor: "#00000000",
-      focusable: true,
+      focusable: !isMac,
       resizable: true,
       movable: true,
+      acceptFirstMouse: true,
+      skipTaskbar: true,
+      ...(isMac
+        ? {
+            type: "panel"
+          }
+        : {}),
       x: 100, // Start at a visible position
       y: 100
     }
@@ -105,38 +118,45 @@ export class WindowHelper {
     // this.mainWindow.webContents.openDevTools()
     this.mainWindow.setContentProtection(true)
 
-    if (process.platform === "darwin") {
+    if (isMac && this.mainWindow) {
       this.mainWindow.setVisibleOnAllWorkspaces(true, {
         visibleOnFullScreen: true
       })
       this.mainWindow.setHiddenInMissionControl(true)
-      this.mainWindow.setAlwaysOnTop(true, "floating")
-    }
-    if (process.platform === "linux") {
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+      this.mainWindow.setMovable(true)
+      this.mainWindow.setFocusable(false)
+      this.applyPassiveMode()
+
+      try {
+        this.mainWindow.setWindowButtonVisibility?.(false)
+      } catch (error) {
+        console.warn("Unable to hide window buttons:", error)
+      }
+    } else if (process.platform === "linux") {
       // Linux-specific optimizations for better compatibility
       if (this.mainWindow.setHasShadow) {
         this.mainWindow.setHasShadow(false)
       }
       // Keep window focusable on Linux for proper interaction
       this.mainWindow.setFocusable(true)
-    } 
-    this.mainWindow.setSkipTaskbar(true)
-    this.mainWindow.setAlwaysOnTop(true)
+      this.mainWindow.setAlwaysOnTop(true)
+    } else {
+      this.mainWindow.setAlwaysOnTop(true)
+    }
 
     this.mainWindow.loadURL(startUrl).catch((err) => {
       console.error("Failed to load URL:", err)
     })
 
     // Show window after loading URL and center it
-    this.mainWindow.once('ready-to-show', () => {
-      if (this.mainWindow) {
-        this.centerWindow()
-        this.mainWindow.show()
-        this.mainWindow.focus()
-        this.mainWindow.setAlwaysOnTop(true)
-        this.mainWindow.webContents.send('focus-chat-input')
-        console.log("Window is now visible and centered")
+    this.mainWindow.once("ready-to-show", () => {
+      if (!this.mainWindow) {
+        return
       }
+      this.centerWindow()
+      this.showMainWindow({ capture: true })
+      console.log("Window is now visible and centered")
     })
 
     const bounds = this.mainWindow.getBounds()
@@ -158,6 +178,12 @@ export class WindowHelper {
         this.windowPosition = { x: bounds.x, y: bounds.y }
         this.currentX = bounds.x
         this.currentY = bounds.y
+      }
+    })
+
+    this.mainWindow.on("blur", () => {
+      if (this.captureMode) {
+        this.exitCaptureMode()
       }
     })
 
@@ -193,11 +219,14 @@ export class WindowHelper {
     const bounds = this.mainWindow.getBounds()
     this.windowPosition = { x: bounds.x, y: bounds.y }
     this.windowSize = { width: bounds.width, height: bounds.height }
+    if (this.captureMode) {
+      this.exitCaptureMode({ refocusSafari: false, keepVisible: false })
+    }
     this.mainWindow.hide()
     this.isWindowVisible = false
   }
 
-  public showMainWindow(): void {
+  public showMainWindow(options: { capture?: boolean } = {}): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) {
       console.warn("Main window does not exist or is destroyed.")
       return
@@ -212,26 +241,58 @@ export class WindowHelper {
       })
     }
 
-    this.mainWindow.show()
-    this.mainWindow.focus()
-    this.mainWindow.webContents.focus()
+    const shouldCapture = options.capture ?? true
 
-    if (process.platform === "darwin") {
-      this.mainWindow.setAlwaysOnTop(true, "floating")
+    if (shouldCapture) {
+      this.enterCaptureMode()
     } else {
-      this.mainWindow.setAlwaysOnTop(true)
+      this.captureMode = false
+      this.applyPassiveMode()
+      this.showWindowAccordingToMode()
     }
-
-    this.mainWindow.webContents.send("focus-chat-input")
-
-    this.isWindowVisible = true
   }
 
   public toggleMainWindow(): void {
     if (this.isWindowVisible) {
       this.hideMainWindow()
     } else {
-      this.showMainWindow()
+      this.showMainWindow({ capture: true })
+    }
+  }
+
+  public togglePassiveMode(): void {
+    if (this.captureMode) {
+      this.exitCaptureMode({ keepVisible: true, refocusSafari: false })
+    } else {
+      this.enterCaptureMode()
+    }
+  }
+
+  public showPassiveOverlay(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      console.warn("Main window does not exist or is destroyed.")
+      return
+    }
+
+    if (this.captureMode) {
+      this.exitCaptureMode({ keepVisible: true, refocusSafari: false })
+    }
+
+    this.captureMode = false
+
+    if (process.platform === "darwin") {
+      this.previousAppBundleId = this.findCurrentFrontmostApp()
+    }
+
+    this.captureMode = false
+    this.applyPassiveMode()
+    this.showWindowAccordingToMode()
+    if (!this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("overlay-capture-mode-change", false)
+    }
+
+    if (process.platform === "darwin") {
+      this.scheduleSafariRefocus()
     }
   }
 
@@ -283,13 +344,170 @@ export class WindowHelper {
     }
 
     this.centerWindow()
-    this.mainWindow.show()
-    this.mainWindow.focus()
-    this.mainWindow.setAlwaysOnTop(true)
-    this.mainWindow.webContents.send('focus-chat-input')
-    this.isWindowVisible = true
+    this.showMainWindow({ capture: true })
     
     console.log(`Window centered and shown`)
+  }
+
+  public enterCaptureMode(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
+    }
+
+    if (this.captureMode) {
+      return
+    }
+
+    this.captureMode = true
+    this.clearSafariRefocusTimer()
+
+    if (process.platform === "darwin") {
+      this.mainWindow.setIgnoreMouseEvents(false)
+      this.mainWindow.setFocusable(true)
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+      this.mainWindow.show()
+      this.mainWindow.focus()
+    } else {
+      this.mainWindow.setAlwaysOnTop(true)
+      this.mainWindow.show()
+      this.mainWindow.focus()
+    }
+
+    this.mainWindow.setIgnoreMouseEvents(false)
+    this.mainWindow.webContents.focus()
+    this.mainWindow.webContents.send("focus-chat-input")
+    this.mainWindow.webContents.send("overlay-capture-mode-change", true)
+    this.isWindowVisible = true
+  }
+
+  public exitCaptureMode(options: { refocusSafari?: boolean; keepVisible?: boolean } = {}): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
+    }
+
+    if (!this.captureMode) {
+      return
+    }
+
+    this.captureMode = false
+    const keepVisible = options.keepVisible ?? true
+
+    if (process.platform === "darwin") {
+      this.mainWindow.setIgnoreMouseEvents(true, { forward: true })
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+      this.mainWindow.setFocusable(false)
+      if (keepVisible) {
+        this.mainWindow.showInactive()
+      }
+    } else {
+      this.mainWindow.blur()
+      this.mainWindow.setAlwaysOnTop(true)
+      this.mainWindow.setIgnoreMouseEvents(false)
+    }
+
+    this.applyPassiveMode()
+    this.mainWindow.webContents.send("overlay-capture-mode-change", false)
+  }
+
+  public toggleCaptureMode(): void {
+    if (this.captureMode) {
+      this.exitCaptureMode()
+    } else {
+      this.enterCaptureMode()
+    }
+  }
+
+  public isCaptureModeActive(): boolean {
+    return this.captureMode
+  }
+
+  private applyPassiveMode(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
+    }
+
+    if (process.platform === "darwin") {
+      this.mainWindow.setAlwaysOnTop(true, "screen-saver")
+      this.mainWindow.setIgnoreMouseEvents(true, { forward: true })
+      this.mainWindow.setFocusable(false)
+    } else {
+      this.mainWindow.setAlwaysOnTop(true)
+      this.mainWindow.setIgnoreMouseEvents(false)
+    }
+  }
+
+  private showWindowAccordingToMode(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
+    }
+
+    if (this.captureMode) {
+      this.enterCaptureMode()
+      this.isWindowVisible = true
+      return
+    }
+
+    if (process.platform === "darwin") {
+      this.applyPassiveMode()
+      this.mainWindow.showInactive()
+    } else {
+      this.mainWindow.show()
+      this.mainWindow.focus()
+      this.mainWindow.webContents.focus()
+      this.mainWindow.setAlwaysOnTop(true)
+    }
+
+    this.isWindowVisible = true
+  }
+
+  private scheduleSafariRefocus(): void {
+    if (process.platform !== "darwin") {
+      return
+    }
+
+    if (this.safariRefocusTimer) {
+      clearTimeout(this.safariRefocusTimer)
+    }
+
+    this.safariRefocusTimer = setTimeout(() => {
+      const bundleId = this.previousAppBundleId ?? "com.apple.Safari"
+
+      const script =
+        bundleId === "com.apple.Safari"
+          ? 'tell application "Safari" to activate'
+          : `tell application id "${bundleId}" to activate`
+
+      execFile("osascript", ["-e", script], (error) => {
+        if (error) {
+          console.warn("Failed to refocus application:", error)
+        }
+      })
+      this.previousAppBundleId = null
+      this.safariRefocusTimer = null
+    }, 120)
+  }
+
+  private clearSafariRefocusTimer(): void {
+    if (this.safariRefocusTimer) {
+      clearTimeout(this.safariRefocusTimer)
+      this.safariRefocusTimer = null
+    }
+  }
+
+  private findCurrentFrontmostApp(): string | null {
+    try {
+      const output = execSync(
+        'osascript -e "tell application \"System Events\" to get bundle identifier of first application process whose frontmost is true"',
+        { encoding: "utf8" }
+      )
+      const bundleId = output.trim()
+      if (bundleId.length > 0) {
+        return bundleId
+      }
+    } catch (error) {
+      console.warn("Unable to determine frontmost application:", error)
+    }
+    return null
   }
 
   // New methods for window movement

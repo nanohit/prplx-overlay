@@ -2,9 +2,9 @@
 
 import { AppState } from "./main"
 import { LLMHelper } from "./LLMHelper"
-import dotenv from "dotenv"
 
-dotenv.config()
+// Note: In packaged apps, environment variables are set at build time or via system
+// dotenv is not needed and doesn't work inside .asar archives
 
 const isDev = process.env.NODE_ENV === "development"
 const isDevTest = process.env.IS_DEV_TEST === "true"
@@ -19,6 +19,12 @@ export class ProcessingHelper {
   constructor(appState: AppState) {
     this.appState = appState
     
+    // Allow running without a real LLM in dev / CI / explicit override
+    const allowMock =
+      process.env.MOCK_LLM === "true" ||
+      process.env.ALLOW_NO_LLM === "true" ||
+      process.env.NODE_ENV === "development"
+
     // Check if user wants to use Ollama
     const useOllama = process.env.USE_OLLAMA === "true"
     const ollamaModel = process.env.OLLAMA_MODEL // Don't set default here, let LLMHelper auto-detect
@@ -29,10 +35,16 @@ export class ProcessingHelper {
       this.llmHelper = new LLMHelper(undefined, true, ollamaModel, ollamaUrl)
     } else {
       const apiKey = process.env.GEMINI_API_KEY
-      if (!apiKey) {
-        throw new Error("GEMINI_API_KEY not found in environment variables. Set GEMINI_API_KEY or enable Ollama with USE_OLLAMA=true")
+      if (!apiKey && !allowMock) {
+        throw new Error(
+          "GEMINI_API_KEY not found. Set GEMINI_API_KEY, enable USE_OLLAMA=true, or set MOCK_LLM=true for offline dev mode."
+        )
       }
-      console.log("[ProcessingHelper] Initializing with Gemini")
+      if (!apiKey && allowMock) {
+        console.warn("[ProcessingHelper] No GEMINI_API_KEY provided. Using mock/offline mode.")
+      } else {
+        console.log("[ProcessingHelper] Initializing with Gemini")
+      }
       this.llmHelper = new LLMHelper(apiKey, false)
     }
   }

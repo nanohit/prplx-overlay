@@ -135,8 +135,34 @@ export class AppState {
     this.windowHelper.hideMainWindow()
   }
 
-  public showMainWindow(): void {
-    this.windowHelper.showMainWindow()
+  public showMainWindow(options?: { capture?: boolean }): void {
+    this.windowHelper.showMainWindow(options ?? {})
+  }
+
+  public showPassiveOverlay(): void {
+    this.windowHelper.showPassiveOverlay()
+  }
+
+  public triggerAutoSend(
+    message: string,
+    options: { model: PerplexityModelKey; shouldStartNewChat?: boolean; preservePreferences?: boolean }
+  ): void {
+    const mainWindow = this.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+
+    this.updatePerplexityPreferences({
+      model: options.model,
+      shouldStartNewChat: options.shouldStartNewChat ?? true
+    })
+
+    mainWindow.webContents.send("perplexity-auto-send", {
+      prompt: message,
+      model: options.model,
+      shouldStartNewChat: options.shouldStartNewChat,
+      preservePreferences: options.preservePreferences ?? false
+    })
   }
 
   public toggleMainWindow(): void {
@@ -253,21 +279,22 @@ export class AppState {
     return screenshotPath
   }
 
-  public async startCutScreenshotFlow(): Promise<void> {
+  public async startCutScreenshotFlow(): Promise<{
+    screenshotPath: string
+    preview: string
+  } | null> {
     const mainWindow = this.getMainWindow()
     if (!mainWindow) {
       console.warn("No main window for cut screenshot flow")
-      return
+      return null
     }
 
     await this.ensureScreenCapturePermission()
 
-    let overlayRestored = true
-
     try {
       const selection = await this.selectionHelper.startSelection()
       if (!selection) {
-        return
+        return null
       }
 
       // Small delay to ensure overlay windows are fully removed
@@ -301,6 +328,8 @@ export class AppState {
         }
       }
 
+      return { screenshotPath, preview }
+
     } catch (error: any) {
       console.error("Cut screenshot flow failed:", error)
       if (!mainWindow.isDestroyed()) {
@@ -312,6 +341,7 @@ export class AppState {
       throw error
     } finally {
     }
+    return null
   }
 
   public async sendPendingAttachment(
@@ -376,6 +406,25 @@ export class AppState {
     this.windowHelper.centerAndShowWindow()
   }
 
+  public enterCaptureMode(): void {
+    this.windowHelper.enterCaptureMode()
+  }
+
+  public exitCaptureMode(options?: {
+    refocusSafari?: boolean
+    keepVisible?: boolean
+  }): void {
+    this.windowHelper.exitCaptureMode(options ?? {})
+  }
+
+  public toggleCaptureMode(): void {
+    this.windowHelper.togglePassiveMode()
+  }
+
+  public isCaptureModeActive(): boolean {
+    return this.windowHelper.isCaptureModeActive()
+  }
+
   private async delay(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms))
   }
@@ -417,9 +466,14 @@ async function initializeApp() {
     }
   })
 
+  // Keep the app visible in the Dock so users can relaunch/quit easily.
   if (process.platform === "darwin") {
-    app.dock?.hide()
-    app.setActivationPolicy("accessory")
+    try {
+      app.setActivationPolicy("regular")
+      app.dock?.show()
+    } catch (error) {
+      console.warn("Failed to set macOS activation policy:", error)
+    }
   }
   app.commandLine.appendSwitch("disable-background-timer-throttling")
 }

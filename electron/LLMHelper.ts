@@ -12,10 +12,16 @@ export class LLMHelper {
   private useOllama: boolean = false
   private ollamaModel: string = "llama3.2"
   private ollamaUrl: string = "http://localhost:11434"
+  private useMock: boolean = false
 
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string) {
     this.useOllama = useOllama
-    
+
+    const allowMock =
+      process.env.MOCK_LLM === "true" ||
+      process.env.ALLOW_NO_LLM === "true" ||
+      process.env.NODE_ENV === "development"
+
     if (useOllama) {
       this.ollamaUrl = ollamaUrl || "http://localhost:11434"
       this.ollamaModel = ollamaModel || "gemma:latest" // Default fallback
@@ -28,7 +34,12 @@ export class LLMHelper {
       this.model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" })
       console.log("[LLMHelper] Using Google Gemini")
     } else {
-      throw new Error("Either provide Gemini API key or enable Ollama mode")
+      if (allowMock) {
+        this.useMock = true
+        console.warn("[LLMHelper] No GEMINI_API_KEY or Ollama. Starting in mock/offline mode.")
+      } else {
+        throw new Error("Either provide GEMINI_API_KEY, enable USE_OLLAMA=true, or set MOCK_LLM=true for offline mode.")
+      }
     }
   }
 
@@ -143,6 +154,21 @@ export class LLMHelper {
   }
 
   public async generateSolution(problemInfo: any) {
+    if (this.useMock) {
+      return {
+        solution: {
+          code: "// mock solution – replace with your own output",
+          problem_statement: problemInfo?.problem_statement ?? "Problem not provided",
+          context: "Mock context (offline mode).",
+          suggested_responses: [
+            "Provide your own answer – running in offline mock mode",
+            "Set GEMINI_API_KEY or USE_OLLAMA=true for real responses"
+          ],
+          reasoning: "LLM disabled; mock response to keep UI working."
+        }
+      }
+    }
+
     const prompt = `${this.systemPrompt}\n\nGiven this problem or situation:\n${JSON.stringify(problemInfo, null, 2)}\n\nPlease provide your response in the following JSON format:\n{
   "solution": {
     "code": "The code or main answer here.",
@@ -169,6 +195,21 @@ export class LLMHelper {
   }
 
   public async debugSolutionWithImages(problemInfo: any, currentCode: string, debugImagePaths: string[]) {
+    if (this.useMock) {
+      return {
+        solution: {
+          code: currentCode || "// mock debug result – replace with your own",
+          problem_statement: problemInfo?.problem_statement ?? "Problem not provided",
+          context: "Mock debug context (offline mode).",
+          suggested_responses: [
+            "Enable GEMINI_API_KEY or USE_OLLAMA=true for real debugging",
+            "Review screenshots manually – mock mode active"
+          ],
+          reasoning: "LLM disabled; using mock debug response."
+        }
+      }
+    }
+
     try {
       const imageParts = await Promise.all(debugImagePaths.map(path => this.fileToGenerativePart(path)))
       
@@ -195,6 +236,13 @@ export class LLMHelper {
   }
 
   public async analyzeAudioFile(audioPath: string) {
+    if (this.useMock) {
+      return {
+        text: "Mock audio analysis (offline mode). Provide your own summary.",
+        timestamp: Date.now()
+      }
+    }
+
     try {
       const audioData = await fs.promises.readFile(audioPath);
       const audioPart = {
@@ -215,6 +263,13 @@ export class LLMHelper {
   }
 
   public async analyzeAudioFromBase64(data: string, mimeType: string) {
+    if (this.useMock) {
+      return {
+        text: "Mock audio analysis (offline mode). Provide your own summary.",
+        timestamp: Date.now()
+      }
+    }
+
     try {
       const audioPart = {
         inlineData: {
@@ -234,6 +289,13 @@ export class LLMHelper {
   }
 
   public async analyzeImageFile(imagePath: string) {
+    if (this.useMock) {
+      return {
+        text: "Mock image analysis (offline mode). Provide your own description.",
+        timestamp: Date.now()
+      }
+    }
+
     try {
       const imageData = await fs.promises.readFile(imagePath);
       const imagePart = {
@@ -257,6 +319,8 @@ export class LLMHelper {
     try {
       if (this.useOllama) {
         return this.callOllama(message);
+      } else if (this.useMock) {
+        return `Mock reply (offline mode): ${message.slice(0, 120)}`
       } else if (this.model) {
         const result = await this.model.generateContent(message);
         const response = await result.response;

@@ -23,6 +23,25 @@ export class ShortcutsHelper {
       this.appState.centerAndShowWindow()
     })
 
+    globalShortcut.register("CommandOrControl+'", () => {
+      const isVisible = this.appState.isVisible()
+      const isCaptureMode = this.appState.isCaptureModeActive()
+
+      if (!isVisible) {
+        console.log("Overlay not visible. Entering active mode.")
+        this.appState.showMainWindow({ capture: true })
+        return
+      }
+
+      if (isCaptureMode) {
+        console.log("Overlay active. Switching to passive mode.")
+        this.appState.showPassiveOverlay()
+      } else {
+        console.log("Overlay passive. Entering active mode.")
+        this.appState.enterCaptureMode()
+      }
+    })
+
     globalShortcut.register("CommandOrControl+H", async () => {
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow) {
@@ -48,8 +67,58 @@ export class ShortcutsHelper {
       }
     })
 
+    const captureAndAutoSend = async (
+      description: string,
+      prompt: string,
+      model: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+    ) => {
+      try {
+        console.log(description)
+        const capture = await this.appState.startCutScreenshotFlow()
+        if (capture) {
+          this.appState.triggerAutoSend(prompt, {
+            model,
+            shouldStartNewChat: true,
+            preservePreferences: true
+          })
+        }
+      } catch (error) {
+        console.error(`${description} failed:`, error)
+      } finally {
+        this.appState.showPassiveOverlay()
+      }
+    }
+
     globalShortcut.register("CommandOrControl+Shift+Enter", async () => {
-      await this.appState.processingHelper.processScreenshots()
+      await captureAndAutoSend(
+        "Cmd+Shift+Enter pressed: capturing and sending via GPT-5.",
+        "",
+        "gpt-5"
+      )
+    })
+
+    globalShortcut.register("CommandOrControl+'+Enter", async () => {
+      await captureAndAutoSend(
+        "Cmd+' then Enter pressed: capturing and sending via GPT-5 Reasoning.",
+        "Реши. Think longer and harder.",
+        "gpt-5-reasoning"
+      )
+    })
+
+    globalShortcut.register("CommandOrControl+1", async () => {
+      await captureAndAutoSend(
+        "Cmd+1 pressed: quick capture to GPT-5.",
+        "",
+        "gpt-5"
+      )
+    })
+
+    globalShortcut.register("CommandOrControl+2", async () => {
+      await captureAndAutoSend(
+        "Cmd+2 pressed: quick capture to GPT-5 Reasoning with think prompt.",
+        "Реши. Think longer and harder.",
+        "gpt-5-reasoning"
+      )
     })
 
     globalShortcut.register("CommandOrControl+R", () => {
@@ -105,35 +174,20 @@ export class ShortcutsHelper {
       this.appState.toggleMainWindow()
     })
 
-    globalShortcut.register("CommandOrControl+B", () => {
-      this.appState.toggleMainWindow()
-      const mainWindow = this.appState.getMainWindow()
-      if (mainWindow && !this.appState.isVisible()) {
-        if (process.platform === "darwin") {
-          mainWindow.setAlwaysOnTop(true, "normal")
-          setTimeout(() => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.setAlwaysOnTop(true, "floating")
-            }
-          }, 100)
-        }
-      }
-    })
-
     // Model selection shortcuts
     globalShortcut.register("CommandOrControl+M", () => {
       this.emitWhenVisible("perplexity-model-shortcut", "sonar")
     })
 
-    globalShortcut.register("CommandOrControl+Comma", () => {
+    globalShortcut.register("CommandOrControl+,", () => {
       this.emitWhenVisible("perplexity-model-shortcut", "gpt-5")
     })
 
-    globalShortcut.register("CommandOrControl+Period", () => {
+    globalShortcut.register("CommandOrControl+.", () => {
       this.emitWhenVisible("perplexity-model-shortcut", "gpt-5-reasoning")
     })
 
-    globalShortcut.register("CommandOrControl+Slash", () => {
+    globalShortcut.register("CommandOrControl+/", () => {
       this.emitWhenVisible("perplexity-model-shortcut", "claude-sonnet-4.5-reasoning")
     })
 

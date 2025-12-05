@@ -18,7 +18,6 @@ const App: React.FC = () => {
   const [view, setView] = useState<"queue" | "solutions" | "debug">("queue")
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Effect for height monitoring
   useEffect(() => {
     const cleanup = window.electronAPI.onResetView(() => {
       console.log("Received 'reset-view' message from main process.")

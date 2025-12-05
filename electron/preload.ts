@@ -39,6 +39,7 @@ interface ElectronAPI {
   onSolutionSuccess: (callback: (data: any) => void) => () => void
   onUnauthorized: (callback: () => void) => () => void
   onFocusChatInput: (callback: () => void) => () => void
+  onOverlayCaptureModeChange: (callback: (active: boolean) => void) => () => void
   onPerplexityAttachmentReady: (callback: (data: { path: string; preview: string }) => void) => () => void
   onPerplexityAttachmentError: (callback: (error: string) => void) => () => void
   onPerplexityNewChatStarted: (callback: () => void) => () => void
@@ -53,6 +54,10 @@ interface ElectronAPI {
   moveWindowUp: () => Promise<void>
   moveWindowDown: () => Promise<void>
   forceOpenPerplexity: () => Promise<void>
+  enterOverlayCaptureMode: () => Promise<{ active: boolean }>
+  exitOverlayCaptureMode: () => Promise<{ active: boolean }>
+  toggleOverlayCaptureMode: () => Promise<{ active: boolean }>
+  getOverlayCaptureMode: () => Promise<{ active: boolean }>
   analyzeAudioFromBase64: (
     data: string,
     mimeType: string
@@ -227,11 +232,40 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("focus-chat-input", subscription)
     }
   },
+  onOverlayCaptureModeChange: (callback: (active: boolean) => void) => {
+    const subscription = (_: any, active: boolean) => callback(active)
+    ipcRenderer.on("overlay-capture-mode-change", subscription)
+    return () => {
+      ipcRenderer.removeListener("overlay-capture-mode-change", subscription)
+    }
+  },
   onPerplexityAttachmentReady: (callback: (data: { path: string; preview: string }) => void) => {
     const subscription = (_: any, data: { path: string; preview: string }) => callback(data)
     ipcRenderer.on("perplexity-attachment-ready", subscription)
     return () => {
       ipcRenderer.removeListener("perplexity-attachment-ready", subscription)
+    }
+  },
+  onPerplexityAutoSend: (
+    callback: (payload: {
+      prompt: string
+      model: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+      shouldStartNewChat?: boolean
+      preservePreferences?: boolean
+    }) => void
+  ) => {
+    const subscription = (
+      _event: Electron.IpcRendererEvent,
+      payload: {
+        prompt: string
+        model: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+        shouldStartNewChat?: boolean
+        preservePreferences?: boolean
+      }
+    ) => callback(payload)
+    ipcRenderer.on("perplexity-auto-send", subscription)
+    return () => {
+      ipcRenderer.removeListener("perplexity-auto-send", subscription)
     }
   },
   onPerplexityAttachmentError: (callback: (error: string) => void) => {
@@ -276,6 +310,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   moveWindowUp: () => ipcRenderer.invoke("move-window-up"),
   moveWindowDown: () => ipcRenderer.invoke("move-window-down"),
   forceOpenPerplexity: () => ipcRenderer.invoke("force-open-perplexity"),
+  enterOverlayCaptureMode: () => ipcRenderer.invoke("overlay-enter-capture-mode"),
+  exitOverlayCaptureMode: () => ipcRenderer.invoke("overlay-exit-capture-mode"),
+  toggleOverlayCaptureMode: () => ipcRenderer.invoke("overlay-toggle-capture-mode"),
+  getOverlayCaptureMode: () => ipcRenderer.invoke("overlay-capture-mode-state"),
   analyzeAudioFromBase64: (data: string, mimeType: string) => ipcRenderer.invoke("analyze-audio-base64", data, mimeType),
   analyzeAudioFile: (path: string) => ipcRenderer.invoke("analyze-audio-file", path),
   analyzeImageFile: (path: string) => ipcRenderer.invoke("analyze-image-file", path),

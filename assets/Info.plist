@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Privacy permission descriptions shown in macOS dialogs -->
+    
+    <!-- Screen Recording Permission Description -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Perplexity Overlay needs screen recording permission to capture screenshots for AI assistance.</string>
+    
+    <!-- Accessibility Permission Description -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Perplexity Overlay needs accessibility permission to detect screen content and provide contextual AI assistance.</string>
+    
+    <!-- Apple Events/Automation Permission Description -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Perplexity Overlay needs to control Safari to send prompts to Perplexity AI and retrieve responses.</string>
+    
+    <!-- Camera Permission (if ever needed for future features) -->
+    <key>NSCameraUsageDescription</key>
+    <string>Perplexity Overlay may use the camera for enhanced features.</string>
+    
+    <!-- Microphone Permission (if ever needed for voice features) -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Perplexity Overlay may use the microphone for voice input features.</string>
+    
+    <!-- Desktop Folder Access -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Perplexity Overlay needs access to your Desktop to save screenshots.</string>
+    
+    <!-- Documents Folder Access -->
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Perplexity Overlay needs access to your Documents folder to save and read files.</string>
+    
+    <!-- Downloads Folder Access -->
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Perplexity Overlay needs access to your Downloads folder to manage files.</string>
+</dict>
+</plist>

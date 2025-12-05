@@ -18,6 +18,7 @@ export interface ElectronAPI {
   onUnauthorized: (callback: () => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
+  onOverlayCaptureModeChange: (callback: (active: boolean) => void) => () => void
   onPerplexityAttachmentReady: (callback: (data: { path: string; preview: string }) => void) => () => void
   onPerplexityAttachmentError: (callback: (error: string) => void) => () => void
   onPerplexityNewChatStarted: (callback: () => void) => () => void
@@ -43,6 +44,14 @@ export interface ElectronAPI {
     callback: (model: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning") => void
   ) => () => void
   onWebSearchToggle: (callback: () => void) => () => void
+  onPerplexityAutoSend: (
+    callback: (payload: {
+      prompt: string
+      model: "sonar" | "gpt-5" | "gpt-5-reasoning" | "claude-sonnet-4.5-reasoning"
+      shouldStartNewChat?: boolean
+      preservePreferences?: boolean
+    }) => void
+  ) => () => void
   analyzeAudioFromBase64: (data: string, mimeType: string) => Promise<{ text: string; timestamp: number }>
   analyzeAudioFile: (path: string) => Promise<{ text: string; timestamp: number }>
   analyzeImageFile: (path: string) => Promise<void>

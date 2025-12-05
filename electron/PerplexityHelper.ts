@@ -35,19 +35,41 @@ interface PerplexityStreamPayload {
 
 function resolveScriptPath(fileName: string): string {
   const appPath = app.getAppPath()
+  const resourcesPath = process.resourcesPath ?? appPath
+  
+  // In production, app.getAppPath() returns the path to the asar archive
+  // Scripts are unpacked from asar and also copied to extraResources
   const candidates = [
+    // Development: scripts in project root
     path.join(appPath, "scripts", fileName),
-    path.join(process.resourcesPath ?? appPath, "scripts", fileName)
+    // Production: scripts in extraResources
+    path.join(resourcesPath, "scripts", fileName),
+    // Production: unpacked from asar
+    path.join(appPath + ".unpacked", "scripts", fileName),
+    // Alternative production path
+    path.join(path.dirname(appPath), "scripts", fileName),
+    // macOS .app bundle structure
+    path.join(resourcesPath, "..", "Resources", "scripts", fileName),
   ]
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[PerplexityHelper] Looking for script: ${fileName}`)
+    console.log(`[PerplexityHelper] appPath: ${appPath}`)
+    console.log(`[PerplexityHelper] resourcesPath: ${resourcesPath}`)
+    console.log(`[PerplexityHelper] candidates:`, candidates)
+  }
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       ensureExecutable(candidate)
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[PerplexityHelper] Found script at: ${candidate}`)
+      }
       return candidate
     }
   }
 
-  throw new Error(`Perplexity automation script not found. Expected at scripts/${fileName}`)
+  throw new Error(`Perplexity automation script not found. Expected at scripts/${fileName}. Searched: ${candidates.join(", ")}`)
 }
 
 function resolveSendScriptPath(): string {

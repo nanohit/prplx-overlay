@@ -137,6 +137,24 @@ textarea,
   font-weight: 600;
 }
 
+.overlay-mode-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  display: inline-block;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
+  transition: background-color 0.18s ease;
+}
+
+.overlay-mode-indicator--active {
+  background: #3bd671;
+}
+
+.overlay-mode-indicator--passive {
+  background: #ff5f57;
+}
+
 .overlay-pill {
   background: transparent;
   border: none;

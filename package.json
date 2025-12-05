@@ -1,30 +1,55 @@
 {
-  "name": "interview-coder",
+  "name": "perplexity-overlay",
   "version": "1.0.0",
+  "description": "AI-powered overlay assistant that integrates with Perplexity AI via Safari",
   "main": "./dist-electron/main.js",
+  "author": "Perplexity Overlay Team",
+  "license": "MIT",
+  "private": true,
   "scripts": {
-    "clean": "rimraf dist dist-electron",
+    "clean": "rimraf dist dist-electron release",
+    "clean:all": "rimraf dist dist-electron release node_modules",
     "dev": "vite",
-    "build": "npm run clean && tsc && vite build",
+    "build": "npm run clean && tsc -p electron/tsconfig.json && vite build",
     "preview": "vite preview",
-    "postinstall": "cross-env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm rebuild sharp",
+    "postinstall": "electron-builder install-app-deps",
+    "prebuild:check": "node scripts/prebuild-check.js",
     "electron:dev": "tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .",
     "electron:build": "tsc -p electron/tsconfig.json && cross-env NODE_ENV=production electron .",
     "app:dev": "concurrently \"npm run dev -- --port 5180\" \"wait-on http://localhost:5180 && npm run electron:dev\"",
-    "app:build": "npm run build && electron-builder",
+    "app:build": "npm run prebuild:check && npm run build && electron-builder --mac",
+    "app:build:arm64": "npm run prebuild:check && npm run build && electron-builder --mac --arm64",
+    "app:build:x64": "npm run prebuild:check && npm run build && electron-builder --mac --x64",
+    "app:build:universal": "npm run prebuild:check && npm run build && electron-builder --mac --universal",
     "watch": "tsc -p electron/tsconfig.json --watch",
     "start": "npm run app:dev",
-    "dist": "npm run app:build"
+    "dist": "npm run app:build",
+    "dist:arm64": "npm run app:build:arm64",
+    "dist:x64": "npm run app:build:x64",
+    "rebuild": "electron-rebuild -f -w sharp,screenshot-desktop"
   },
   "build": {
-    "appId": "com.electron.meeting-notes",
-    "productName": "Meeting Notes Coder",
+    "appId": "com.perplexity.overlay",
+    "productName": "Perplexity Overlay",
+    "copyright": "Copyright © 2024 Perplexity Overlay",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/screenshot-desktop/**/*",
+      "node_modules/tesseract.js/**/*",
+      "node_modules/tesseract.js-core/**/*",
+      "scripts/**/*"
+    ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "scripts/**/*",
       "package.json",
-      "node_modules/**/*"
+      "!**/*.map",
+      "!**/*.ts",
+      "!**/tsconfig*.json"
     ],
     "directories": {
       "output": "release",
@@ -32,39 +57,79 @@
     },
     "extraResources": [
       {
-        "from": "assets/",
-        "to": "assets/"
+        "from": "scripts/",
+        "to": "scripts/",
+        "filter": ["**/*.jxa"]
+      },
+      {
+        "from": "assets/icons/",
+        "to": "assets/icons/"
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "assets/icons/mac/icon.icns",
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
+          "arch": ["arm64", "x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64", "x64"]
         }
       ],
-      "icon": "assets/icons/mac/icon.icns",
       "hardenedRuntime": true,
-      "entitlements": "assets/entitlements.mac.plist"
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Perplexity Overlay needs to control Safari to interact with Perplexity AI.",
+        "NSScreenCaptureUsageDescription": "Perplexity Overlay needs screen recording permission to capture screenshots.",
+        "NSAccessibilityUsageDescription": "Perplexity Overlay needs accessibility permissions for overlay functionality.",
+        "NSDesktopFolderUsageDescription": "Perplexity Overlay may save screenshots to your Desktop.",
+        "NSDocumentsFolderUsageDescription": "Perplexity Overlay may access Documents for file operations.",
+        "NSDownloadsFolderUsageDescription": "Perplexity Overlay may access Downloads for file operations.",
+        "LSUIElement": true,
+        "LSBackgroundOnly": false
+      },
+      "darkModeSupport": true,
+      "minimumSystemVersion": "10.15.0",
+      "signIgnore": [
+        "node_modules/sharp/vendor/**/*"
+      ]
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 400
+      },
+      "title": "Perplexity Overlay Installer",
+      "icon": "assets/icons/mac/icon.icns",
+      "iconSize": 100,
+      "backgroundColor": "#ffffff"
     },
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64",
-            "ia32"
-          ]
+          "arch": ["x64", "ia32"]
         },
         {
           "target": "portable",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "icon": "assets/icons/win/icon.ico",
@@ -74,15 +139,11 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         },
         {
           "target": "deb",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "icon": "assets/icons/png/",
@@ -92,20 +153,22 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Perplexity Overlay"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "ibttf",
-        "repo": "interview-coder-frontend"
-      }
-    ]
+    "publish": null,
+    "npmRebuild": true,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "perplexity",
+    "ai",
+    "overlay",
+    "productivity",
+    "assistant",
+    "electron"
+  ],
   "devDependencies": {
     "@types/color": "^4.2.0",
     "@types/dompurify": "^3.0.5",
@@ -126,6 +189,7 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-is-dev": "^3.0.1",
+    "electron-rebuild": "^3.2.9",
     "postcss": "^8.4.49",
     "rimraf": "^6.0.1",
     "tailwindcss": "^3.4.15",
